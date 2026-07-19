@@ -1,0 +1,92 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: ../docker/Dockerfile.backend
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - JWT_SECRET=${JWT_SECRET}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY}
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASS=${SMTP_PASS}
+      - SCRAPER_URL=http://scraper:5001
+      - DETECTOR_URL=http://detector:5003
+    depends_on:
+      - postgres
+    networks:
+      - agent-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ../docker/Dockerfile.frontend
+    ports:
+      - "3001:3001"
+    depends_on:
+      - backend
+    networks:
+      - agent-network
+
+  scraper:
+    build:
+      context: ./services/scraper
+      dockerfile: ../../docker/Dockerfile.scraper
+    ports:
+      - "5001:5001"
+    environment:
+      - GROQ_API_KEY=${GROQ_API_KEY}
+    networks:
+      - agent-network
+
+  social:
+    build:
+      context: ./services/social
+      dockerfile: ../../docker/Dockerfile.social
+    ports:
+      - "5002:5002"
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    networks:
+      - agent-network
+
+  detector:
+    build:
+      context: ./services/detector
+      dockerfile: ../../docker/Dockerfile.detector
+    ports:
+      - "5003:5003"
+    environment:
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - DETECTOR_GEMINI_MODEL=${DETECTOR_GEMINI_MODEL}
+      - DETECTOR_GROQ_MODEL=${DETECTOR_GROQ_MODEL}
+      - DETECTOR_MISTRAL_MODEL=${DETECTOR_MISTRAL_MODEL}
+    networks:
+      - agent-network
+
+  postgres:
+    image: postgres:15
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - agent-network
+
+networks:
+  agent-network:
+    driver: bridge
+
+volumes:
+  postgres_data:

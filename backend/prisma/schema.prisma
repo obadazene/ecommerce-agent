@@ -1,0 +1,39 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model AppHealth {
+  id        Int      @id @default(autoincrement())
+  createdAt DateTime @default(now())
+
+  @@map("app_health")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  name      String
+  createdAt DateTime @default(now())
+}
+
+model Product {
+  id            String    @id
+  name          String
+  price         Float
+  currency      String
+  url           String
+  platform      String
+  imageUrl      String?
+  sellerName    String?
+  sellerRating  Float?
+  launchDate    DateTime?
+  criteriaScore Float?
+  isNew         Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+}

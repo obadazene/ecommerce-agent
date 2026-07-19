@@ -1,0 +1,23 @@
+FROM python:3.11-slim
+
+# This Dockerfile is for local development of the scraper service.
+# Use `services/scraper/Dockerfile` when you want to run the service independently.
+
+WORKDIR /app
+
+# system deps for Playwright and common build tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget gnupg ca-certificates build-essential \
+    libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libx11-xcb1 libxcomposite1 libxdamage1 libxrandr2 libgbm-dev libasound2 \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Install Playwright browsers (if Playwright is used, this will download browsers)
+RUN python -m playwright install --with-deps || true
+
+COPY . .
+
+EXPOSE 5001
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "5001"]

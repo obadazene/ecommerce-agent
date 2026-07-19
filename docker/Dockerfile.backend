@@ -1,0 +1,21 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Copy package files (context expected to be the backend folder)
+COPY package*.json ./
+
+RUN npm install --production=false
+RUN apk add --no-cache openssl
+
+# Copy backend source
+COPY . .
+
+# Generate Prisma client for runtime initialization
+RUN npx prisma generate
+
+RUN npm run build
+
+EXPOSE 3000
+
+CMD ["node", "dist/main.js"]
