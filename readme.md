@@ -124,8 +124,8 @@ The E-Commerce Agent is a personal product research assistant that automates the
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/[YOUR_USERNAME]/tfm-ecommerce-agent.git
-cd tfm-ecommerce-agent
+git clone https://github.com/obadazene/ecommerce-agent.git
+cd ecommerce-agent
 
 # 2. Backend Setup
 cd backend
@@ -384,7 +384,7 @@ curl -X POST http://localhost:3000/auth/login \
 
 ### Repository
 
-- GitHub Repository: `https://github.com/[YOUR_USERNAME]/tfm-ecommerce-agent`
+- GitHub Repository: `https://github.com/obadazene/ecommerce-agent`
 - Repository Visibility: Public recommended for TFM submission
 - If private, grant access to: `mouredev@gmail.com`
 
