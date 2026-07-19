@@ -351,6 +351,8 @@ ecommerce-agent/
 
 This project includes authentication. Before final TFM submission, replace the placeholders below with a working evaluator account.
 
+Important: share only the demo user for the application. Do not share raw API keys or SMTP passwords in the README, repository, slides, or submission form.
+
 ```text
 Demo User Email: [REPLACE_BEFORE_SUBMISSION]
 Demo Password: [REPLACE_BEFORE_SUBMISSION]
@@ -393,6 +395,12 @@ curl -X POST http://localhost:3000/auth/login \
 - Production URL: `https://[YOUR-DEPLOY-URL]`
 - Frontend Local URL: `http://localhost:3001`
 - Backend Local URL: `http://localhost:3000`
+
+### Evaluator Access Note
+
+- If the application is deployed, the evaluator should test it using the public URL and the demo account above.
+- If the application is not deployed, the evaluator can run it locally using this README and their own API keys in `.env`.
+- Private secrets such as `GEMINI_API_KEY`, `GROQ_API_KEY`, `MISTRAL_API_KEY`, and `SMTP_PASS` must never be shared publicly.
 
 ### Suggested Deployment Strategy
 
