@@ -11,7 +11,10 @@ export class SearchProductUseCase {
     private readonly scraperPort: ScraperPort,
   ) {}
 
-  async execute(criteria: SearchProductDto): Promise<Result<Product[]>> {
+  async execute(
+    criteria: SearchProductDto,
+    options?: { useBrightData?: boolean },
+  ): Promise<Result<Product[]>> {
     try {
       const products = await this.scraperPort.searchAliExpress(
         criteria.keyword,
@@ -21,6 +24,7 @@ export class SearchProductUseCase {
           minSales: criteria.minSales,
           platforms: criteria.platforms,
         },
+        options,
       );
 
       return Result.success(products);

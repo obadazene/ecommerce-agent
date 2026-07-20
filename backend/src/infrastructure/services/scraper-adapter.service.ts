@@ -109,6 +109,9 @@ export class ScraperAdapterService implements ScraperPort {
       minSales?: number;
       platforms?: string[];
     },
+    options?: {
+      useBrightData?: boolean;
+    },
   ): Promise<Product[]> {
     const safeMaxPrice =
       typeof maxPrice === "number" && !isNaN(maxPrice) ? maxPrice : 20;
@@ -124,7 +127,10 @@ export class ScraperAdapterService implements ScraperPort {
       const response = await fetch(`${this.scraperUrl}/search/aliexpress`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: keyword }),
+        body: JSON.stringify({
+          query: keyword,
+          useBrightData: options?.useBrightData,
+        }),
       });
 
       const keywordQuery = encodeURIComponent(keyword);
@@ -170,12 +176,10 @@ export class ScraperAdapterService implements ScraperPort {
         sortIndex: index,
       }));
 
-      const items = (
-        rawProducts.length > 0 ? rawProducts : fallbackItems
-      ).filter((item) => !!item.url);
+      const items = rawProducts.length > 0 ? rawProducts : fallbackItems;
 
       const products = items.slice(0, 12).map((item, index) => {
-        const itemUrl = item.url || fallbackUrl;
+        const itemUrl = item.url || "";
         const parsedLaunchDate =
           typeof item.launchDate === "string" &&
           item.launchDate.trim().length > 0

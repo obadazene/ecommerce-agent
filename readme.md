@@ -163,24 +163,39 @@ pip install -r requirements.txt
 uvicorn app.main:app --port 5003
 ```
 
+### Docker Compose (Recommended)
+
+```bash
+docker compose up -d --build
+docker compose logs -f backend scraper frontend
+docker compose restart backend scraper frontend
+docker compose down
+```
+
+Use Docker Compose if you want the full stack running together with the same service wiring used in the current setup.
+
 ### 🔧 Environment Configuration
 
 After copying `.env.example` to `.env`, configure the following values:
 
 #### Required Configuration
 
-| Variable                  | Description                                  | Example                                                  |
-| ------------------------- | -------------------------------------------- | -------------------------------------------------------- |
-| `DATABASE_URL`            | PostgreSQL connection string                 | `postgresql://user:pass@localhost:5432/db`               |
-| `JWT_SECRET`              | Secret key for JWT tokens                    | `random-32-char-string`                                  |
-| `GEMINI_API_KEY`          | Google Gemini API key                        | Get from [Google AI Studio](https://aistudio.google.com) |
-| `GROQ_API_KEY`            | Groq API key for LLM                         | Get from [Groq Console](https://console.groq.com)        |
-| `MISTRAL_API_KEY`         | Mistral API key                              | Get from [Mistral Console](https://console.mistral.ai)   |
-| `BRIGHT_DATA_API_KEY`     | Bright Data Web Unlocker API key             | Required for primary AliExpress scraping                 |
-| `BRIGHT_DATA_ZONE`        | Bright Data Web Unlocker zone                | Example: `web_unlocker1`                                 |
-| `BRIGHT_DATA_MIN_CREDITS` | Credit threshold for switching to Playwright | `100`                                                    |
+| Variable                          | Description                                  | Example                                                  |
+| --------------------------------- | -------------------------------------------- | -------------------------------------------------------- |
+| `DATABASE_URL`                    | PostgreSQL connection string                 | `postgresql://user:pass@localhost:5432/db`               |
+| `JWT_SECRET`                      | Secret key for JWT tokens                    | `random-32-char-string`                                  |
+| `GEMINI_API_KEY`                  | Google Gemini API key                        | Get from [Google AI Studio](https://aistudio.google.com) |
+| `GROQ_API_KEY`                    | Groq API key for LLM                         | Get from [Groq Console](https://console.groq.com)        |
+| `MISTRAL_API_KEY`                 | Mistral API key                              | Get from [Mistral Console](https://console.mistral.ai)   |
+| `BRIGHT_DATA_API_URL`             | Bright Data Web Unlocker endpoint            | `https://api.brightdata.com/request`                     |
+| `BRIGHT_DATA_API_KEY`             | Bright Data Web Unlocker API key             | Required for primary AliExpress scraping                 |
+| `BRIGHT_DATA_ZONE`                | Bright Data Web Unlocker zone                | Example: `web_unlocker1`                                 |
+| `BRIGHT_DATA_FORMAT`              | Bright Data response format                  | `raw`                                                    |
+| `BRIGHT_DATA_MIN_CREDITS`         | Credit threshold for switching to Playwright | `100`                                                    |
+| `SEARCH_KEYWORD_CONCURRENCY`      | Parallel keyword workers per run             | `3`                                                      |
+| `SEARCH_MAX_BRIGHT_DATA_ATTEMPTS` | Max Bright Data keyword attempts per run     | `3`                                                      |
 
-**Bright Data setup:** Create or copy a Web Unlocker API key from your [Bright Data dashboard](https://brightdata.com/), then set `BRIGHT_DATA_API_KEY`, `BRIGHT_DATA_ZONE`, and `BRIGHT_DATA_MIN_CREDITS` in `.env`.
+**Bright Data setup:** Create or copy a Web Unlocker API key from your [Bright Data dashboard](https://brightdata.com/), then set `BRIGHT_DATA_API_URL`, `BRIGHT_DATA_API_KEY`, `BRIGHT_DATA_ZONE`, `BRIGHT_DATA_FORMAT`, and `BRIGHT_DATA_MIN_CREDITS` in `.env`.
 
 #### 📧 Email Configuration (SMTP)
 
@@ -224,9 +239,11 @@ SMTP_TO=recipient@gmail.com
 
 - `POST /products/auto-search` - **Trigger autonomous product discovery**
   - Searches AliExpress with multiple discovery keywords such as `trending`, `new 2026`, `best seller`, and `hot sale`
-  - Uses Bright Data first, then Playwright, then HTML/Bing/demo fallbacks
+  - Runs keyword discovery in parallel batches (default concurrency: 3) with deduped keywords
+  - Uses Bright Data first with a per-run cap (default: 3 keyword attempts), then Playwright, then HTML/Bing/demo fallbacks
   - Scores products against the 7 winning criteria
-  - Keeps both winning and non-winning products for review in the report
+  - Leaves the product URL blank when no reachable URL is available, instead of showing a fallback link
+  - Keeps both winning and non-winning products in the report so you can review possible scoring errors, false positives, or false negatives
   - Checks social-media and marketplace presence as decision signals, not hard rejection gates
   - Sends email report with high-potential dropshipping products
 
@@ -243,6 +260,15 @@ SMTP_TO=recipient@gmail.com
 - `GET /products` - Get all products in database
 - `GET /products/new` - Detect newly discovered products + send email
 
+### Current Search Flow
+
+1. Build keywords and run them in small parallel batches.
+2. Try Bright Data for a limited number of keyword searches.
+3. Fall back to Playwright, then HTML/Bing, then demo/cache when needed.
+4. Score the products and run social/ecommerce signals as advisory checks.
+5. Keep the URL blank when no reachable product URL exists.
+6. Include winners and non-winners in the report for review.
+
 ---
 
 ## 🤖 How Autonomous Discovery Works
@@ -251,9 +277,9 @@ SMTP_TO=recipient@gmail.com
 
 ```
 1. AliExpress Search
-   ↓ (Multiple keywords: trending, new 2026, best seller, hot sale, etc.)
+   ↓ (Multiple keywords, deduplicated and processed in parallel batches)
 2. Bright Data Web Unlocker
-   ↓ (Primary source)
+   ↓ (Primary source with capped attempts per run to control credit usage)
 3. Playwright / HTML / Bing / demo fallback
    ↓ (Used when Bright Data fails or credits are low)
 4. Product Scoring
@@ -280,7 +306,7 @@ Each product is scored 0-100 on these 7 dimensions:
 
 **Winning Score Threshold: ≥ 50/100**
 
-Only products scoring 50 or higher are considered viable dropshipping candidates, but non-winning products are also included in the report so you can review possible AI scoring mistakes.
+Only products scoring 50 or higher are considered viable dropshipping candidates, but non-winning products are also included in the report so you can review possible scoring uncertainty, false positives, and false negatives before making a final decision. If a product URL is unavailable, the table cell stays blank.
 
 **Manual Trigger:**
 
@@ -353,6 +379,8 @@ ecommerce-agent/
 - Harden production integrations for social-media sources.
 - Improve cross-platform marketplace validation with live lookups.
 - Expand deployment automation and monitoring.
+- Add stronger URL validation/cleanup for future stale cache entries.
+- Add a clearer report label for demo/fallback products so they are not confused with live discovery results.
 
 ---
 

@@ -86,9 +86,13 @@ export class Product {
   }
 
   /**
-   * Validates that the URL is in a valid format
+   * Validates that the URL is either empty or in a valid format
    */
   private validateUrl(url: string): void {
+    if (!url || url.trim().length === 0) {
+      return;
+    }
+
     try {
       new URL(url);
     } catch {

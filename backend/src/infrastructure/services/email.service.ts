@@ -10,6 +10,7 @@ import {
   ScoringService,
 } from "../../domain/services/scoring.service";
 import { WinningProductCriteria } from "../../domain/value-objects/winning-product-criteria.vo";
+import { resolveReachableProductUrl } from "../../shared/product-url.util";
 
 @Injectable()
 export class EmailService implements EmailPort {
@@ -140,18 +141,19 @@ export class EmailService implements EmailPort {
           product.name,
           product.platform,
         );
-        return { product, social, ecommerce };
+        const safeUrl = await resolveReachableProductUrl(product.url);
+        return { product, social, ecommerce, safeUrl };
       }),
     );
 
     const rows = productRowsData
       .map(
-        ({ product, social, ecommerce }) => `
+        ({ product, social, ecommerce, safeUrl }) => `
           <tr>
             <td>${product.name}</td>
             <td>${product.platform}</td>
             <td>${product.price} ${product.currency}</td>
-            <td><a href="${product.url}" target="_blank" rel="noopener noreferrer">Open product</a></td>
+            <td>${safeUrl ? `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">Open product</a>` : ""}</td>
             <td>${product.sellerRating ?? "N/A"}</td>
             <td>${product.criteriaScore ?? "N/A"}</td>
             <td>${this.formatDate(product.launchDate)}</td>
@@ -179,7 +181,8 @@ export class EmailService implements EmailPort {
           product.name,
           product.platform,
         );
-        return { product, social, ecommerce };
+        const safeUrl = await resolveReachableProductUrl(product.url);
+        return { product, social, ecommerce, safeUrl };
       }),
     );
 
@@ -204,12 +207,12 @@ export class EmailService implements EmailPort {
 
     const nonWinningRows = nonWinningRowsData
       .map(
-        ({ product, social, ecommerce }) => `
+        ({ product, social, ecommerce, safeUrl }) => `
           <tr>
             <td>${product.name}</td>
             <td>${product.platform}</td>
             <td>${product.price} ${product.currency}</td>
-            <td><a href="${product.url}" target="_blank" rel="noopener noreferrer">Open product</a></td>
+            <td>${safeUrl ? `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">Open product</a>` : ""}</td>
             <td>${product.sellerRating ?? "N/A"}</td>
             <td>${product.criteriaScore ?? "N/A"}</td>
             <td>${this.formatDate(product.launchDate)}</td>

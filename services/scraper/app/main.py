@@ -43,6 +43,7 @@ LAST_SCRAPE_SOURCE = "none"
 
 class SearchRequest(BaseModel):
     query: str
+    useBrightData: bool | None = None
 
 class LookupRequest(BaseModel):
     url: str
@@ -122,11 +123,11 @@ def is_aliexpress_block_page(html: str) -> bool:
     return any(marker.lower() in lowered for marker in markers)
 
 
-async def search_aliexpress_api(query: str) -> tuple[list[dict], bool, str]:
+async def search_aliexpress_api(query: str, use_bright_data: bool = True) -> tuple[list[dict], bool, str]:
     """Search AliExpress using Bright Data first, then local fallbacks."""
     fallback_reason = None
 
-    if should_use_bright_data():
+    if use_bright_data and should_use_bright_data():
         try:
             products, remaining = await scrape_with_bright_data(query)
             if products:
@@ -147,7 +148,10 @@ async def search_aliexpress_api(query: str) -> tuple[list[dict], bool, str]:
             )
     else:
         remaining = get_cached_credit_balance()
-        if remaining <= 0:
+        if not use_bright_data:
+            fallback_reason = "Bright Data disabled for this request"
+            logger.info("Bright Data disabled for query '%s'. Using Playwright fallback", query)
+        elif remaining <= 0:
             fallback_reason = "Bright Data credits exhausted"
             logger.warning("Bright Data credits exhausted. Using Playwright fallback")
         else:
@@ -733,11 +737,12 @@ async def get_demo_products(query: str) -> list[dict]:
     logger.warning("Layer 3/Demo: returning demo products for query '%s'", query)
 
     query_label = query.strip() or "trending"
+    search_url = f"https://www.aliexpress.com/wholesale?SearchText={quote_plus(query_label)}"
     demo_rows = [
         {
             "name": f"{query_label.title()} Portable Blender",
             "price": 19.99,
-            "url": "https://www.aliexpress.com/item/100500000000001.html",
+            "url": search_url,
             "image_url": "https://via.placeholder.com/640x640.png?text=Portable+Blender",
             "seller_name": "Demo Store A",
             "seller_rating": 4.7,
@@ -746,7 +751,7 @@ async def get_demo_products(query: str) -> list[dict]:
         {
             "name": f"{query_label.title()} LED Strip Lights",
             "price": 12.49,
-            "url": "https://www.aliexpress.com/item/100500000000002.html",
+            "url": search_url,
             "image_url": "https://via.placeholder.com/640x640.png?text=LED+Strip+Lights",
             "seller_name": "Demo Store B",
             "seller_rating": 4.6,
@@ -755,7 +760,7 @@ async def get_demo_products(query: str) -> list[dict]:
         {
             "name": f"{query_label.title()} Pet Grooming Glove",
             "price": 8.95,
-            "url": "https://www.aliexpress.com/item/100500000000003.html",
+            "url": search_url,
             "image_url": "https://via.placeholder.com/640x640.png?text=Pet+Grooming+Glove",
             "seller_name": "Demo Store C",
             "seller_rating": 4.8,
@@ -789,7 +794,8 @@ async def search_aliexpress(request: SearchRequest):
     global LAST_SCRAPE_SOURCE
 
     query = request.query.strip()
-    products, blocked, source = await search_aliexpress_api(query)
+    use_bright_data = True if request.useBrightData is None else bool(request.useBrightData)
+    products, blocked, source = await search_aliexpress_api(query, use_bright_data)
     blocked_reason = "ali-captcha" if blocked else None
 
     if not products:

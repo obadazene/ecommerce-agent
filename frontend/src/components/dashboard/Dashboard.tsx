@@ -671,23 +671,41 @@ export default function Dashboard() {
             </div>
 
             <div className="mt-5 grid gap-3 sm:grid-cols-2">
-              {recentProducts.slice(0, 2).map((product) => (
-                <a
-                  key={`${product.id}-link`}
-                  href={product.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="group flex items-center justify-between rounded-2xl border border-white/10 bg-slate-950/55 px-4 py-3 transition hover:border-cyan-400/20 hover:bg-slate-950/70"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-white">
-                      {product.name}
-                    </p>
-                    <p className="text-xs text-slate-500">Open product page</p>
+              {recentProducts.slice(0, 2).map((product) =>
+                product.url ? (
+                  <a
+                    key={`${product.id}-link`}
+                    href={product.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="group flex items-center justify-between rounded-2xl border border-white/10 bg-slate-950/55 px-4 py-3 transition hover:border-cyan-400/20 hover:bg-slate-950/70"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-white">
+                        {product.name}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        Open product page
+                      </p>
+                    </div>
+                    <ArrowRightIcon className="h-4 w-4 text-cyan-300 transition group-hover:translate-x-0.5" />
+                  </a>
+                ) : (
+                  <div
+                    key={`${product.id}-link`}
+                    className="flex items-center justify-between rounded-2xl border border-white/10 bg-slate-950/55 px-4 py-3"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-white">
+                        {product.name}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        No product URL available
+                      </p>
+                    </div>
                   </div>
-                  <ArrowRightIcon className="h-4 w-4 text-cyan-300 transition group-hover:translate-x-0.5" />
-                </a>
-              ))}
+                ),
+              )}
             </div>
           </div>
         </div>

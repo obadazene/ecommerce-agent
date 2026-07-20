@@ -9,6 +9,9 @@ export interface ScraperPort {
       minSales?: number;
       platforms?: string[];
     },
+    options?: {
+      useBrightData?: boolean;
+    },
   ): Promise<Product[]>;
   lookupOnAmazon(
     productName: string,

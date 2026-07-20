@@ -18,6 +18,8 @@ services:
       - SCRAPER_URL=http://scraper:5001
       - SOCIAL_URL=http://social:5002
       - DETECTOR_URL=http://detector:5003
+      - SEARCH_KEYWORD_CONCURRENCY=${SEARCH_KEYWORD_CONCURRENCY:-3}
+      - SEARCH_MAX_BRIGHT_DATA_ATTEMPTS=${SEARCH_MAX_BRIGHT_DATA_ATTEMPTS:-3}
     depends_on:
       - postgres
     networks:

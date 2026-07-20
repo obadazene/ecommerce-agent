@@ -19,6 +19,7 @@ import { SearchProductUseCase } from "../../../application/use-cases/search-prod
 import { SendDailyReportUseCase } from "../../../application/use-cases/send-daily-report.use-case";
 import { Product } from "../../../domain/entities/product.entity";
 import { ScheduledSearchService } from "../../../domain/services/scheduled-search.service";
+import { resolveReachableProductUrl } from "../../../shared/product-url.util";
 import { Result } from "../../../shared/result";
 import { JwtAuthGuard } from "../guards/jwt-auth.guard";
 
@@ -72,6 +73,33 @@ export class ProductController {
     ];
   }
 
+  private parsePositiveInt(
+    rawValue: string | undefined,
+    fallback: number,
+  ): number {
+    if (!rawValue) {
+      return fallback;
+    }
+
+    const parsed = Number.parseInt(rawValue.trim(), 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      return fallback;
+    }
+
+    return parsed;
+  }
+
+  private getKeywordSearchConcurrency(): number {
+    return this.parsePositiveInt(process.env.SEARCH_KEYWORD_CONCURRENCY, 3);
+  }
+
+  private getMaxBrightDataAttemptsPerWorkflow(): number {
+    return this.parsePositiveInt(
+      process.env.SEARCH_MAX_BRIGHT_DATA_ATTEMPTS,
+      3,
+    );
+  }
+
   private buildKeywordListFromCriteria(criteria: SearchProductDto): string[] {
     const rawKeyword = (criteria.keyword ?? "").trim();
 
@@ -85,6 +113,28 @@ export class ProductController {
       .filter((keyword) => keyword.length > 0);
 
     return splitKeywords.length > 0 ? splitKeywords : [rawKeyword];
+  }
+
+  private dedupeKeywords(keywords: string[]): string[] {
+    const seen = new Set<string>();
+    const uniqueKeywords: string[] = [];
+
+    for (const keyword of keywords) {
+      const trimmedKeyword = keyword.trim();
+      if (!trimmedKeyword) {
+        continue;
+      }
+
+      const normalized = trimmedKeyword.toLowerCase();
+      if (seen.has(normalized)) {
+        continue;
+      }
+
+      seen.add(normalized);
+      uniqueKeywords.push(trimmedKeyword);
+    }
+
+    return uniqueKeywords;
   }
 
   private normalizePlatforms(platforms?: string[]): string[] {
@@ -112,39 +162,81 @@ export class ProductController {
   private async discoverProducts(
     criteria: SearchProductDto,
   ): Promise<Product[]> {
-    const keywords = this.buildKeywordListFromCriteria(criteria);
+    const keywords = this.dedupeKeywords(
+      this.buildKeywordListFromCriteria(criteria),
+    );
     this.logger.log(
       `Workflow search using keyword set: ${keywords.join(", ")}`,
     );
 
+    if (keywords.length === 0) {
+      return [];
+    }
+
+    const keywordConcurrency = Math.min(
+      this.getKeywordSearchConcurrency(),
+      keywords.length,
+    );
+    const maxBrightDataAttempts = this.getMaxBrightDataAttemptsPerWorkflow();
+
+    this.logger.log(
+      `Keyword search execution: concurrency=${keywordConcurrency}, maxBrightDataAttempts=${maxBrightDataAttempts}`,
+    );
+
     const productsByKey = new Map<string, Product>();
+    let nextKeywordIndex = 0;
+    let brightDataAttempts = 0;
 
-    for (const keyword of keywords) {
-      const keywordCriteria = this.buildSearchCriteria(criteria, keyword);
+    const worker = async () => {
+      while (nextKeywordIndex < keywords.length) {
+        const keywordIndex = nextKeywordIndex;
+        nextKeywordIndex += 1;
 
-      this.logger.debug(`Running scraper search for keyword: ${keyword}`);
-      const searchResult =
-        await this.searchProductUseCase.execute(keywordCriteria);
-      if (searchResult.isFailure()) {
-        this.logger.warn(
-          `Search failed for keyword '${keyword}': ${searchResult.getError()}`,
+        const keyword = keywords[keywordIndex];
+        const useBrightData = brightDataAttempts < maxBrightDataAttempts;
+        if (useBrightData) {
+          brightDataAttempts += 1;
+        }
+
+        const keywordCriteria = this.buildSearchCriteria(criteria, keyword);
+
+        this.logger.debug(
+          `Running scraper search for keyword: ${keyword} (brightData=${useBrightData})`,
         );
-        continue;
-      }
 
-      const foundProducts = searchResult.getValue();
-      this.logger.log(
-        `Keyword '${keyword}' returned ${foundProducts.length} products`,
-      );
+        const searchResult = await this.searchProductUseCase.execute(
+          keywordCriteria,
+          {
+            useBrightData,
+          },
+        );
 
-      for (const product of foundProducts) {
-        const dedupeKey =
-          product.url?.trim().toLowerCase() || product.id.trim().toLowerCase();
-        if (!productsByKey.has(dedupeKey)) {
-          productsByKey.set(dedupeKey, product);
+        if (searchResult.isFailure()) {
+          this.logger.warn(
+            `Search failed for keyword '${keyword}': ${searchResult.getError()}`,
+          );
+          continue;
+        }
+
+        const foundProducts = searchResult.getValue();
+        this.logger.log(
+          `Keyword '${keyword}' returned ${foundProducts.length} products`,
+        );
+
+        for (const product of foundProducts) {
+          const dedupeKey =
+            product.url?.trim().toLowerCase() ||
+            product.id.trim().toLowerCase();
+          if (!productsByKey.has(dedupeKey)) {
+            productsByKey.set(dedupeKey, product);
+          }
         }
       }
-    }
+    };
+
+    await Promise.all(
+      Array.from({ length: keywordConcurrency }, async () => worker()),
+    );
 
     return Array.from(productsByKey.values());
   }
@@ -168,7 +260,9 @@ export class ProductController {
         }
 
         const score = scoreResult.getValue().overallScore;
-        const scoredProduct = this.withCriteriaScore(product, score);
+        const scoredProduct = await this.withReachableUrl(
+          this.withCriteriaScore(product, score),
+        );
         analyzed.push(scoredProduct);
 
         if (score < minOverallScore) {
@@ -397,6 +491,30 @@ export class ProductController {
       product.sellerRating,
       product.launchDate,
       criteriaScore,
+      product.isNew,
+      product.createdAt,
+    );
+  }
+
+  private async withReachableUrl(product: Product): Promise<Product> {
+    const safeUrl = await resolveReachableProductUrl(product.url);
+
+    if (safeUrl === product.url) {
+      return product;
+    }
+
+    return new Product(
+      product.id,
+      product.name,
+      product.price,
+      safeUrl,
+      product.platform,
+      product.currency,
+      product.imageUrl,
+      product.sellerName,
+      product.sellerRating,
+      product.launchDate,
+      product.criteriaScore,
       product.isNew,
       product.createdAt,
     );
