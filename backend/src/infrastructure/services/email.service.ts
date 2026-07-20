@@ -82,7 +82,11 @@ export class EmailService implements EmailPort {
           ? "[DEGRADED: FALLBACK CACHE] "
           : report.dataQuality === "blocked-source"
             ? "[BLOCKED SOURCE] "
-            : "";
+            : report.dataQuality === "demo-fallback"
+              ? "[DEMO FALLBACK] "
+              : report.dataQuality === "mixed-source"
+                ? "[MIXED SOURCE] "
+                : "";
       this.logger.log(
         `Report email target: ${to}. Quality: ${report.dataQuality}. Totals -> discovered: ${report.totalProducts}, winners: ${report.products.length}, non-winning: ${report.nonWinningProducts.length}`,
       );
@@ -132,6 +136,8 @@ export class EmailService implements EmailPort {
       "live-data": "live-data",
       "fallback-cache": "fallback-cache",
       "blocked-source": "blocked-source",
+      "demo-fallback": "demo-fallback",
+      "mixed-source": "mixed-source",
     };
 
     const productRowsData = await Promise.all(
@@ -141,7 +147,11 @@ export class EmailService implements EmailPort {
           product.name,
           product.platform,
         );
-        const safeUrl = await resolveReachableProductUrl(product.url);
+        const isDemoSource =
+          (product.source ?? "").trim().toLowerCase() === "demo";
+        const safeUrl = isDemoSource
+          ? ""
+          : await resolveReachableProductUrl(product.url);
         return { product, social, ecommerce, safeUrl };
       }),
     );
@@ -182,7 +192,11 @@ export class EmailService implements EmailPort {
           product.name,
           product.platform,
         );
-        const safeUrl = await resolveReachableProductUrl(product.url);
+        const isDemoSource =
+          (product.source ?? "").trim().toLowerCase() === "demo";
+        const safeUrl = isDemoSource
+          ? ""
+          : await resolveReachableProductUrl(product.url);
         return { product, social, ecommerce, safeUrl };
       }),
     );
@@ -315,13 +329,40 @@ export class EmailService implements EmailPort {
         ? `<div style="margin: 12px 0; padding: 10px 12px; border: 1px solid #b7eb8f; background: #f6ffed; color: #135200; font-weight: 600;">Live data mode: all products in this report come from the current run.</div>`
         : report.dataQuality === "fallback-cache"
           ? `<div style="margin: 12px 0; padding: 10px 12px; border: 1px solid #ffe58f; background: #fffbe6; color: #874d00; font-weight: 600;">Degraded mode (fallback cache): live source was blocked or empty, so cached products were reused to keep reporting continuity.</div>`
-          : `<div style="margin: 12px 0; padding: 10px 12px; border: 1px solid #ffa39e; background: #fff1f0; color: #a8071a; font-weight: 600;">Blocked source mode: live source was blocked and cache had no usable products.</div>`;
+          : report.dataQuality === "demo-fallback"
+            ? `<div style="margin: 12px 0; padding: 10px 12px; border: 1px solid #ffd591; background: #fff7e6; color: #ad4e00; font-weight: 600;">Demo fallback mode: this run completed with demo fallback products instead of confirmed live product pages.</div>`
+            : report.dataQuality === "mixed-source"
+              ? `<div style="margin: 12px 0; padding: 10px 12px; border: 1px solid #91d5ff; background: #e6f7ff; color: #0958d9; font-weight: 600;">Mixed source mode: this run includes both live-source products and fallback/demo products.</div>`
+              : `<div style="margin: 12px 0; padding: 10px 12px; border: 1px solid #ffa39e; background: #fff1f0; color: #a8071a; font-weight: 600;">Blocked source mode: live source was blocked and cache had no usable products.</div>`;
+
+    const sourceCounts = new Map<string, number>();
+    const allReportedProducts = [
+      ...report.products,
+      ...report.nonWinningProducts,
+    ];
+    for (const product of allReportedProducts) {
+      const normalizedSource =
+        product.source?.trim().toLowerCase() || "unknown";
+      sourceCounts.set(
+        normalizedSource,
+        (sourceCounts.get(normalizedSource) ?? 0) + 1,
+      );
+    }
+
+    const sourceSummary =
+      sourceCounts.size === 0
+        ? "none"
+        : Array.from(sourceCounts.entries())
+            .sort((a, b) => b[1] - a[1])
+            .map(([source, count]) => `${source}: ${count}`)
+            .join(" | ");
 
     return `
       <h1>Daily Product Report</h1>
       <p>Date: ${report.date.toDateString()}</p>
       <p>Data quality: <strong>${qualityLabels[report.dataQuality]}</strong></p>
       ${qualityBanner}
+        <p>Source breakdown: <strong>${sourceSummary}</strong></p>
       <p>Total products: ${report.totalProducts}</p>
       <p>Matching products: ${report.matchingProducts}</p>
       <p>New products: ${report.newProducts}</p>

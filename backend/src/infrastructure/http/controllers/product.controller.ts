@@ -13,6 +13,7 @@ import { SearchProductDto } from "../../../application/dto/search-product.dto";
 import { ProductRepositoryPort } from "../../../application/ports/product-repository.port";
 import { CheckCrossPlatformUseCase } from "../../../application/use-cases/check-cross-platform.use-case";
 import { CheckSocialMediaUseCase } from "../../../application/use-cases/check-social-media.use-case";
+import { CheckTechUpdatesUseCase } from "../../../application/use-cases/check-tech-updates.use-case";
 import { DetectNewProductsUseCase } from "../../../application/use-cases/detect-new-products.use-case";
 import { ScoreProductUseCase } from "../../../application/use-cases/score-product.use-case";
 import { SearchProductUseCase } from "../../../application/use-cases/search-product.use-case";
@@ -32,6 +33,7 @@ export class ProductController {
     private readonly searchProductUseCase: SearchProductUseCase,
     private readonly checkCrossPlatformUseCase: CheckCrossPlatformUseCase,
     private readonly checkSocialMediaUseCase: CheckSocialMediaUseCase,
+    private readonly checkTechUpdatesUseCase: CheckTechUpdatesUseCase,
     private readonly scoreProductUseCase: ScoreProductUseCase,
     private readonly sendDailyReportUseCase: SendDailyReportUseCase,
     private readonly detectNewProductsUseCase: DetectNewProductsUseCase,
@@ -354,6 +356,16 @@ export class ProductController {
     }
 
     return result;
+  }
+
+  @Get("tech-updates")
+  async techUpdates(): Promise<Result<any>> {
+    const result = await this.checkTechUpdatesUseCase.execute();
+    if (result.isFailure()) {
+      throw new BadRequestException(result.getError());
+    }
+
+    return Result.success(result.getValue());
   }
 
   @Post("auto-search")

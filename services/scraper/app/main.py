@@ -33,6 +33,8 @@ BRIGHT_DATA_API_URL = os.getenv(
 BRIGHT_DATA_ZONE = os.getenv("BRIGHT_DATA_ZONE", "").strip()
 BRIGHT_DATA_FORMAT = os.getenv("BRIGHT_DATA_FORMAT", "raw").strip() or "raw"
 BRIGHT_DATA_MIN_CREDITS = _get_env_int("BRIGHT_DATA_MIN_CREDITS", 100)
+BRIGHT_DATA_TIMEOUT_SEC = _get_env_int("BRIGHT_DATA_TIMEOUT_SEC", 45)
+BRIGHT_DATA_MAX_RETRIES = _get_env_int("BRIGHT_DATA_MAX_RETRIES", 2)
 CREDIT_FILE = os.getenv(
     "BRIGHT_DATA_CREDIT_FILE",
     "/tmp/bright_data_credits.json",
@@ -142,9 +144,11 @@ async def search_aliexpress_api(query: str, use_bright_data: bool = True) -> tup
         except Exception as error:
             fallback_reason = str(error)
             logger.error(
-                "Layer 1/Bright Data failed for query '%s': %s",
+                "Layer 1/Bright Data failed for query '%s': %s | type=%s | repr=%r",
                 query,
                 fallback_reason,
+                type(error).__name__,
+                error,
             )
     else:
         remaining = get_cached_credit_balance()
@@ -395,20 +399,49 @@ def normalize_aliexpress_url(raw_url: str | None) -> str | None:
     return normalized.split("?", 1)[0]
 
 
+def _item_id_to_url(raw_value: str) -> str | None:
+    match = re.search(r"(?:^|/)(\d{8,20})(?:$|[^0-9])", raw_value)
+    if not match:
+        return None
+    return f"https://www.aliexpress.com/item/{match.group(1)}.html"
+
 def extract_item_urls_from_html(html: str, query: str, max_items: int = 12) -> list[dict]:
     if not html:
         return []
 
-    matches = re.findall(
-        r"(?:https?:\\/\\/[a-z0-9.-]*aliexpress\\.[a-z.]+\\/item\\/\\d+\\.html|https?://[a-z0-9.-]*aliexpress\\.[a-z.]+/item/\\d+\\.html|//[a-z0-9.-]*aliexpress\\.[a-z.]+/item/\\d+\\.html|/item/\\d+\\.html)",
-        html,
-    )
-
+    soup = BeautifulSoup(html, "html.parser")
     seen: set[str] = set()
     items: list[dict] = []
 
-    for index, match in enumerate(matches, start=1):
-        url = normalize_aliexpress_url(match)
+    for anchor in soup.find_all("a", href=True):
+        href = (anchor.get("href") or "").strip()
+        if "/item/" not in href and "itemId=" not in href and "productId=" not in href:
+            continue
+
+        candidate = normalize_aliexpress_url(href)
+        if not candidate:
+            reconstructed = _item_id_to_url(href)
+            candidate = normalize_aliexpress_url(reconstructed) if reconstructed else None
+
+        if not candidate or candidate in seen:
+            continue
+
+        seen.add(candidate)
+        items.append({"title": f"{query} result {len(items) + 1}", "url": candidate})
+        if len(items) >= max_items:
+            return items
+
+    matches = re.findall(
+        r"(?:https?:\/\/[a-z0-9.-]*aliexpress\.[a-z.]+\/(?:item|i)\/\d+(?:\.html)?|https?://[a-z0-9.-]*aliexpress\.[a-z.]+/(?:item|i)/\d+(?:\.html)?|//[a-z0-9.-]*aliexpress\.[a-z.]+/(?:item|i)/\d+(?:\.html)?|/(?:item|i)/\d+(?:\.html)?)",
+        html,
+    )
+
+    for match in matches:
+        candidate_match = match.split("?", 1)[0]
+        reconstructed = _item_id_to_url(candidate_match)
+        url = normalize_aliexpress_url(candidate_match) or (
+            normalize_aliexpress_url(reconstructed) if reconstructed else None
+        )
         if not url or url in seen:
             continue
 
@@ -556,9 +589,91 @@ def _build_product_id(url: str | None, name: str, index: int, prefix: str) -> st
     return f"{prefix}-{slug or f'result-{index + 1}'}"
 
 
+def _extract_string(value) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, dict):
+        for key in ("url", "href", "link", "value"):
+            nested = value.get(key)
+            if isinstance(nested, str) and nested.strip():
+                return nested.strip()
+    return ""
+
+
+def _extract_aliexpress_url_from_raw(raw: dict) -> str:
+    for key in (
+        "url",
+        "product_url",
+        "productUrl",
+        "item_url",
+        "itemUrl",
+        "detail_url",
+        "detailUrl",
+        "canonical_url",
+        "canonicalUrl",
+        "link",
+        "href",
+        "target_url",
+        "targetUrl",
+    ):
+        candidate = _extract_string(raw.get(key))
+        normalized = normalize_aliexpress_url(candidate)
+        if normalized:
+            return normalized
+
+    product_id = _extract_string(
+        raw.get("product_id")
+        or raw.get("productId")
+        or raw.get("item_id")
+        or raw.get("itemId")
+        or raw.get("id")
+    )
+    if product_id.isdigit():
+        return f"https://www.aliexpress.com/item/{product_id}.html"
+
+    return ""
+
+
+def _extract_product_candidates(payload) -> list[dict]:
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+
+    if not isinstance(payload, dict):
+        return []
+
+    direct = payload.get("products") or payload.get("items") or payload.get("results")
+    if isinstance(direct, list):
+        return [item for item in direct if isinstance(item, dict)]
+
+    result_node = payload.get("result")
+    if isinstance(result_node, list):
+        return [item for item in result_node if isinstance(item, dict)]
+    if isinstance(result_node, dict):
+        nested = (
+            result_node.get("products")
+            or result_node.get("items")
+            or result_node.get("results")
+            or result_node.get("organic")
+        )
+        if isinstance(nested, list):
+            return [item for item in nested if isinstance(item, dict)]
+
+    data_node = payload.get("data")
+    if isinstance(data_node, list):
+        return [item for item in data_node if isinstance(item, dict)]
+    if isinstance(data_node, dict):
+        nested = data_node.get("products") or data_node.get("items") or data_node.get("results")
+        if isinstance(nested, list):
+            return [item for item in nested if isinstance(item, dict)]
+
+    return []
+
+
 def _standardize_bright_data_product(raw: dict, index: int, query: str) -> dict:
     name = str(raw.get("title") or raw.get("name") or f"{query} result {index + 1}").strip()
-    url = str(raw.get("url") or raw.get("product_url") or "").strip()
+    url = _extract_aliexpress_url_from_raw(raw)
     price = _parse_price(raw.get("price") or raw.get("current_price"))
     currency = str(raw.get("currency") or "USD").strip() or "USD"
     image_url = raw.get("image") or raw.get("image_url") or raw.get("thumbnail")
@@ -566,7 +681,7 @@ def _standardize_bright_data_product(raw: dict, index: int, query: str) -> dict:
     seller_rating = raw.get("rating") or raw.get("seller_rating")
     sales_count = raw.get("sales_count") or raw.get("sales") or raw.get("orders")
     description = raw.get("description")
-    launch_date = raw.get("launch_date") or raw.get("launchDate")
+    launch_date = raw.get("launch_date") or raw.get("launchDate") or raw.get("opened_since")
 
     return {
         "id": _build_product_id(url, name, index, "aliexpress"),
@@ -652,35 +767,67 @@ async def scrape_with_bright_data(query: str) -> tuple[list[dict], int]:
         "Content-Type": "application/json",
     }
 
-    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-        response = await client.post(
-            BRIGHT_DATA_API_URL,
-            headers=headers,
-            json={
-                "zone": BRIGHT_DATA_ZONE,
-                "url": target_url,
-                "format": BRIGHT_DATA_FORMAT,
-            },
-        )
-        remaining_credits = _extract_remaining_credits(response)
-        update_credit_balance(remaining_credits)
-        logger.info("Bright Data credits: %s remaining", remaining_credits)
-        emit_credit_alert(remaining_credits)
-        response.raise_for_status()
+    timeout_seconds = max(15, BRIGHT_DATA_TIMEOUT_SEC)
+    retry_attempts = max(1, BRIGHT_DATA_MAX_RETRIES)
+    remaining_credits = get_cached_credit_balance()
+    response: httpx.Response | None = None
+    last_error: Exception | None = None
 
-        content_type = response.headers.get("content-type", "").lower()
-        raw_text = response.text
+    async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True) as client:
+        for attempt in range(1, retry_attempts + 1):
+            try:
+                response = await client.post(
+                    BRIGHT_DATA_API_URL,
+                    headers=headers,
+                    json={
+                        "zone": BRIGHT_DATA_ZONE,
+                        "url": target_url,
+                        "format": BRIGHT_DATA_FORMAT,
+                    },
+                )
+                remaining_credits = _extract_remaining_credits(response)
+                update_credit_balance(remaining_credits)
+                logger.info("Bright Data credits: %s remaining", remaining_credits)
+                emit_credit_alert(remaining_credits)
+                response.raise_for_status()
+                break
+            except Exception as error:
+                last_error = error
+                logger.warning(
+                    "Bright Data request attempt %s/%s failed for query '%s': %s | type=%s",
+                    attempt,
+                    retry_attempts,
+                    query,
+                    str(error),
+                    type(error).__name__,
+                )
+                if attempt < retry_attempts:
+                    await asyncio.sleep(1.2 * attempt)
+
+    if response is None:
+        raise RuntimeError(
+            f"Bright Data request failed after {retry_attempts} attempts: {repr(last_error)}"
+        )
+
+    content_type = response.headers.get("content-type", "").lower()
+    raw_text = response.text
 
     raw_products = []
     if "application/json" in content_type:
         payload = response.json()
-        if isinstance(payload, list):
-            raw_products = payload
-        elif isinstance(payload, dict):
-            raw_products = payload.get("products") or payload.get("items") or payload.get("results") or []
+        raw_products = _extract_product_candidates(payload)
+        logger.info("Bright Data JSON candidates for '%s': %s", query, len(raw_products))
 
+        if isinstance(payload, dict):
             # Web Unlocker integrations can return HTML wrapped in JSON fields.
-            html_text = payload.get("html") or payload.get("body") or payload.get("content")
+            html_text = (
+                payload.get("html")
+                or payload.get("body")
+                or payload.get("content")
+            )
+            if isinstance(payload.get("result"), dict):
+                html_text = html_text or payload["result"].get("html") or payload["result"].get("body")
+
             if isinstance(html_text, str) and html_text.strip():
                 raw_text = html_text
     else:
@@ -694,6 +841,12 @@ async def scrape_with_bright_data(query: str) -> tuple[list[dict], int]:
             standardized = _standardize_bright_data_product(raw, index, query)
             if standardized["url"]:
                 products.append(standardized)
+        logger.info(
+            "Bright Data standardized products for '%s': %s/%s with usable URLs",
+            query,
+            len(products),
+            len(raw_products),
+        )
     else:
         if not raw_text.strip():
             raise ValueError("Bright Data returned an empty response body")
@@ -850,6 +1003,8 @@ async def health():
         "brightDataConfigured": bool(BRIGHT_DATA_API_KEY),
         "brightDataZoneConfigured": bool(BRIGHT_DATA_ZONE),
         "brightDataFormat": BRIGHT_DATA_FORMAT,
+        "brightDataTimeoutSec": BRIGHT_DATA_TIMEOUT_SEC,
+        "brightDataMaxRetries": BRIGHT_DATA_MAX_RETRIES,
         "brightDataCreditsRemaining": remaining_credits,
         "brightDataCreditsBelowThreshold": credits_below_threshold,
         "brightDataMinCredits": BRIGHT_DATA_MIN_CREDITS,

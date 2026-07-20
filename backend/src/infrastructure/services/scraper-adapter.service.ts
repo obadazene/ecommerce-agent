@@ -182,7 +182,8 @@ export class ScraperAdapterService implements ScraperPort {
       const items = rawProducts.length > 0 ? rawProducts : fallbackItems;
 
       const products = items.slice(0, 12).map((item, index) => {
-        const itemUrl = item.url || "";
+        const itemSource = (item.source || "").trim().toLowerCase();
+        const itemUrl = itemSource === "demo" ? "" : item.url || "";
         const parsedLaunchDate =
           typeof item.launchDate === "string" &&
           item.launchDate.trim().length > 0

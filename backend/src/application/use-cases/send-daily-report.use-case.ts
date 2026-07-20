@@ -14,12 +14,55 @@ export class SendDailyReportUseCase {
     private readonly productRepository: ProductRepositoryPort,
   ) {}
 
+  private resolveReportQuality(
+    requestedQuality:
+      | "live-data"
+      | "fallback-cache"
+      | "blocked-source"
+      | "demo-fallback"
+      | "mixed-source",
+    analyzedProducts: Product[],
+  ): DailyReportDto["dataQuality"] {
+    if (
+      requestedQuality === "fallback-cache" ||
+      requestedQuality === "blocked-source"
+    ) {
+      return requestedQuality;
+    }
+
+    if (analyzedProducts.length === 0) {
+      return requestedQuality;
+    }
+
+    const sources = analyzedProducts
+      .map((product) => product.source?.trim().toLowerCase() ?? "")
+      .filter((source) => source.length > 0);
+
+    if (sources.length === 0) {
+      return requestedQuality;
+    }
+
+    if (sources.every((source) => source === "demo")) {
+      return "demo-fallback";
+    }
+
+    if (sources.some((source) => source === "demo")) {
+      return "mixed-source";
+    }
+
+    return requestedQuality;
+  }
+
   async executeWithProducts(
     products: Product[],
     analyzedProducts: Product[] = products,
     minMatchingScore: number = 5,
     dataQuality:
-      "live-data" | "fallback-cache" | "blocked-source" = "live-data",
+      | "live-data"
+      | "fallback-cache"
+      | "blocked-source"
+      | "demo-fallback"
+      | "mixed-source" = "live-data",
   ): Promise<Result<void>> {
     try {
       const totalProducts = analyzedProducts.length;
@@ -45,9 +88,14 @@ export class SendDailyReportUseCase {
           product.criteriaScore < minMatchingScore,
       );
 
+      const resolvedQuality = this.resolveReportQuality(
+        dataQuality,
+        analyzedProducts,
+      );
+
       const report = new DailyReportDto(
         new Date(),
-        dataQuality,
+        resolvedQuality,
         totalProducts,
         matchingProducts,
         newProducts,

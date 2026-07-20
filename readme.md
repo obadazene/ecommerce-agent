@@ -30,17 +30,17 @@ The E-Commerce Agent is a personal product research assistant that automates Ali
 
 ### Core Capabilities
 
-| #   | Capability              | Description                                                                    |
-| --- | ----------------------- | ------------------------------------------------------------------------------ |
-| 1   | AliExpress Search       | Searches AliExpress with multiple keywords and fallback scraping               |
-| 2   | Cross-Platform Check    | Checks product presence on Amazon, Shopify, WooCommerce, eBay, Temu            |
-| 3   | Social Media Monitoring | Searches TikTok, Instagram, Twitter, Facebook, YouTube, Pinterest for mentions |
-| 4   | Winning Product Scoring | Scores products against 7 criteria using weighted scoring                      |
-| 5   | Daily Email Report      | Sends a detailed report every day at 5 AM                                      |
-| 6   | New Product Alerts      | Flags products appearing for the first time on AliExpress under given criteria |
-| 7   | Technology Updates      | Notifies monthly about new versions of project technologies                    |
-| 8   | Voice Interaction       | Speak to the agent                                                             |
-| 9   | Manual Trigger          | Run the search on-demand (anytime)                                             |
+| #   | Capability              | Description                                                                     |
+| --- | ----------------------- | ------------------------------------------------------------------------------- |
+| 1   | AliExpress Search       | Searches AliExpress with multiple keywords and fallback scraping                |
+| 2   | Cross-Platform Check    | Checks product presence on Amazon, Shopify, WooCommerce, eBay, Temu             |
+| 3   | Social Media Monitoring | Searches TikTok, Instagram, Twitter, Facebook, YouTube, Pinterest for mentions  |
+| 4   | Winning Product Scoring | Scores products against 7 criteria using weighted scoring                       |
+| 5   | Daily Email Report      | Sends a detailed report every day at 5 AM                                       |
+| 6   | New Product Alerts      | Flags products appearing for the first time on AliExpress under given criteria  |
+| 7   | Technology Updates      | Checks project dependencies against the npm registry and reports newer releases |
+| 8   | Voice Interaction       | Browser voice input for search keywords                                         |
+| 9   | Manual Trigger          | Run the search on-demand (anytime)                                              |
 
 ---
 
@@ -192,10 +192,12 @@ After copying `.env.example` to `.env`, configure the following values:
 | `BRIGHT_DATA_ZONE`                | Bright Data Web Unlocker zone                | Example: `web_unlocker1`                                 |
 | `BRIGHT_DATA_FORMAT`              | Bright Data response format                  | `raw`                                                    |
 | `BRIGHT_DATA_MIN_CREDITS`         | Credit threshold for switching to Playwright | `100`                                                    |
+| `BRIGHT_DATA_TIMEOUT_SEC`         | Timeout per Bright Data request              | `45`                                                     |
+| `BRIGHT_DATA_MAX_RETRIES`         | Retries before Bright Data fallback          | `2`                                                      |
 | `SEARCH_KEYWORD_CONCURRENCY`      | Parallel keyword workers per run             | `3`                                                      |
 | `SEARCH_MAX_BRIGHT_DATA_ATTEMPTS` | Max Bright Data keyword attempts per run     | `3`                                                      |
 
-**Bright Data setup:** Create or copy a Web Unlocker API key from your [Bright Data dashboard](https://brightdata.com/), then set `BRIGHT_DATA_API_URL`, `BRIGHT_DATA_API_KEY`, `BRIGHT_DATA_ZONE`, `BRIGHT_DATA_FORMAT`, and `BRIGHT_DATA_MIN_CREDITS` in `.env`.
+**Bright Data setup:** Create or copy a Web Unlocker API key from your [Bright Data dashboard](https://brightdata.com/), then set `BRIGHT_DATA_API_URL`, `BRIGHT_DATA_API_KEY`, `BRIGHT_DATA_ZONE`, `BRIGHT_DATA_FORMAT`, `BRIGHT_DATA_MIN_CREDITS`, `BRIGHT_DATA_TIMEOUT_SEC`, and `BRIGHT_DATA_MAX_RETRIES` in `.env`.
 
 #### 📧 Email Configuration (SMTP)
 
@@ -259,6 +261,7 @@ SMTP_TO=recipient@gmail.com
 
 - `GET /products` - Get all products in database
 - `GET /products/new` - Detect newly discovered products + send email
+- `GET /products/tech-updates` - Check tracked project dependencies against the npm registry
 
 ### Current Search Flow
 
@@ -377,13 +380,13 @@ ecommerce-agent/
 - Frontend dashboard and chat interface.
 - Multi-service architecture using NestJS, Next.js, and Python workers.
 
-### Planned or In-Progress Enhancements
+### Remaining Enhancements
 
 - Harden production integrations for social-media sources.
 - Improve cross-platform marketplace validation with live lookups.
 - Expand deployment automation and monitoring.
 - Add stronger URL validation/cleanup for future stale cache entries.
-- Add a clearer report label for demo/fallback products so they are not confused with live discovery results.
+- Add a fuller voice-command workflow beyond browser keyword capture.
 
 ---
 

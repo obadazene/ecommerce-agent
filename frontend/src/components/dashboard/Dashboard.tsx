@@ -91,9 +91,28 @@ export default function Dashboard() {
   const [authenticated, setAuthenticated] = useState(false);
   const [searchExpanded, setSearchExpanded] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [voiceSupported, setVoiceSupported] = useState(false);
+  const [voiceListening, setVoiceListening] = useState(false);
 
   useEffect(() => {
     setAuthenticated(hasStoredSession());
+    if (typeof window !== "undefined") {
+      const speechSupport = Boolean(
+        (
+          window as Window & {
+            SpeechRecognition?: unknown;
+            webkitSpeechRecognition?: unknown;
+          }
+        ).SpeechRecognition ||
+        (
+          window as Window & {
+            SpeechRecognition?: unknown;
+            webkitSpeechRecognition?: unknown;
+          }
+        ).webkitSpeechRecognition,
+      );
+      setVoiceSupported(speechSupport);
+    }
   }, []);
 
   const stats = useMemo(() => {
@@ -228,6 +247,67 @@ export default function Dashboard() {
         pushToast("error", message);
       }
     });
+  };
+
+  const startVoiceSearch = () => {
+    if (!authenticated || loading) {
+      return;
+    }
+
+    const SpeechRecognition =
+      (
+        window as Window & {
+          SpeechRecognition?: new () => any;
+          webkitSpeechRecognition?: new () => any;
+        }
+      ).SpeechRecognition ||
+      (
+        window as Window & {
+          SpeechRecognition?: new () => any;
+          webkitSpeechRecognition?: new () => any;
+        }
+      ).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      const message = "Voice input is not supported in this browser.";
+      setStatus(message);
+      pushToast("info", message);
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = "en-US";
+    recognition.interimResults = false;
+    recognition.continuous = false;
+    recognition.maxAlternatives = 1;
+
+    setVoiceListening(true);
+    setStatus("Listening for a search keyword...");
+
+    recognition.onresult = (event: any) => {
+      const transcript = event?.results?.[0]?.[0]?.transcript?.trim();
+      if (transcript) {
+        setSearchForm((current) => ({
+          ...current,
+          keyword: transcript,
+        }));
+        setStatus(`Voice search captured: "${transcript}".`);
+        pushToast("success", `Captured "${transcript}" from voice.`);
+      }
+    };
+
+    recognition.onerror = (event: any) => {
+      const message = `Voice input failed: ${event?.error || "unknown error"}`;
+      setStatus(message);
+      pushToast("error", message);
+      setVoiceListening(false);
+    };
+
+    recognition.onend = () => {
+      setVoiceListening(false);
+    };
+
+    recognition.start();
   };
 
   const runDiscovery = async () => {
@@ -547,6 +627,20 @@ export default function Dashboard() {
                   <div className="flex flex-wrap gap-3">
                     <button
                       type="button"
+                      onClick={startVoiceSearch}
+                      disabled={loading || !authenticated || !voiceSupported}
+                      className="inline-flex items-center gap-2 rounded-2xl border border-cyan-400/20 bg-cyan-400/10 px-5 py-3 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-400/15 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {voiceListening ? (
+                        <ArrowPathIcon className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <MagnifyingGlassIcon className="h-4 w-4" />
+                      )}
+                      {voiceListening ? "Listening..." : "Voice search"}
+                    </button>
+
+                    <button
+                      type="button"
                       onClick={runDiscovery}
                       disabled={loading || !authenticated}
                       className="inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-emerald-400 to-teal-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-50"
@@ -569,6 +663,13 @@ export default function Dashboard() {
                       Load stored products
                     </button>
                   </div>
+
+                  {!voiceSupported ? (
+                    <p className="text-xs text-slate-500">
+                      Voice search is only available in browsers with the Web
+                      Speech API.
+                    </p>
+                  ) : null}
                 </div>
               )}
             </div>
@@ -677,7 +778,7 @@ export default function Dashboard() {
 
             <div className="mt-5 grid gap-3 sm:grid-cols-2">
               {recentProducts.slice(0, 2).map((product) =>
-                product.url ? (
+                product.url && product.source?.toLowerCase() !== "demo" ? (
                   <a
                     key={`${product.id}-link`}
                     href={product.url}
