@@ -11,6 +11,7 @@ export class Product {
   readonly currency: string;
   readonly url: string;
   readonly platform: string;
+  readonly source: string | null;
   readonly imageUrl: string | null;
   readonly sellerName: string | null;
   readonly sellerRating: number | null;
@@ -25,6 +26,7 @@ export class Product {
     price: number,
     url: string,
     platform: string,
+    source: string | null = null,
     currency: string = "USD",
     imageUrl: string | null = null,
     sellerName: string | null = null,
@@ -49,6 +51,7 @@ export class Product {
     this.currency = currency;
     this.url = url;
     this.platform = platform;
+    this.source = source;
     this.imageUrl = imageUrl;
     this.sellerName = sellerName;
     this.sellerRating = sellerRating;

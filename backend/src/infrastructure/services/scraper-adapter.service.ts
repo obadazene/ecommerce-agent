@@ -6,6 +6,7 @@ import { Product } from "../../domain/entities/product.entity";
 type AliExpressSearchResponse = {
   blocked?: boolean;
   blockedReason?: string | null;
+  source?: string | null;
   products?: Array<{
     name?: string;
     price?: number | null;
@@ -159,6 +160,7 @@ export class ScraperAdapterService implements ScraperPort {
           currency: product.currency,
           sellerName: product.seller_name,
           platform: product.platform,
+          source: payload.source ?? null,
           sortIndex: index,
         })) ?? [];
 
@@ -173,6 +175,7 @@ export class ScraperAdapterService implements ScraperPort {
         currency: undefined,
         sellerName: undefined,
         platform: undefined,
+        source: payload.source ?? null,
         sortIndex: index,
       }));
 
@@ -216,6 +219,7 @@ export class ScraperAdapterService implements ScraperPort {
             : safeMaxPrice,
           itemUrl,
           item.platform || "AliExpress",
+          item.source || null,
           item.currency || "USD",
           item.imageUrl || null,
           item.sellerName || null,
@@ -249,7 +253,7 @@ export class ScraperAdapterService implements ScraperPort {
       });
 
       this.logger.log(
-        `Found ${filteredProducts.length} AliExpress item links for keyword: ${keyword}`,
+        `Found ${filteredProducts.length} AliExpress items for keyword: ${keyword} (source=${payload.source ?? "unknown"})`,
       );
       return filteredProducts;
     } catch (error) {

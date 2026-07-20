@@ -6,6 +6,7 @@ export class ProductResponseDto {
     public readonly currency: string,
     public readonly url: string,
     public readonly platform: string,
+    public readonly source: string | null,
     public readonly imageUrl: string | null,
     public readonly sellerName: string | null,
     public readonly sellerRating: number | null,

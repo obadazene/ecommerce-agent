@@ -29,6 +29,7 @@ model Product {
   currency      String
   url           String
   platform      String
+  source        String?
   imageUrl      String?
   sellerName    String?
   sellerRating  Float?

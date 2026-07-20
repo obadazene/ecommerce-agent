@@ -152,6 +152,7 @@ export class EmailService implements EmailPort {
           <tr>
             <td>${product.name}</td>
             <td>${product.platform}</td>
+            <td>${product.source ?? "N/A"}</td>
             <td>${product.price} ${product.currency}</td>
             <td>${safeUrl ? `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">Open product</a>` : ""}</td>
             <td>${product.sellerRating ?? "N/A"}</td>
@@ -211,6 +212,7 @@ export class EmailService implements EmailPort {
           <tr>
             <td>${product.name}</td>
             <td>${product.platform}</td>
+            <td>${product.source ?? "N/A"}</td>
             <td>${product.price} ${product.currency}</td>
             <td>${safeUrl ? `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">Open product</a>` : ""}</td>
             <td>${product.sellerRating ?? "N/A"}</td>
@@ -242,6 +244,7 @@ export class EmailService implements EmailPort {
           <tr>
             <th>Name</th>
             <th>Platform</th>
+            <th>Source</th>
             <th>Price</th>
             <th>URL</th>
             <th>Seller Rating</th>
@@ -276,6 +279,7 @@ export class EmailService implements EmailPort {
           <tr>
             <th>Name</th>
             <th>Platform</th>
+            <th>Source</th>
             <th>Price</th>
             <th>URL</th>
             <th>Seller Rating</th>

@@ -35,6 +35,7 @@ type Product = {
   currency: string;
   url: string;
   platform: string;
+  source: string | null;
   imageUrl: string | null;
   criteriaScore: number | null;
   isNew: boolean;
@@ -604,6 +605,7 @@ export default function Dashboard() {
                     <tr>
                       <th className="px-4 py-3 font-medium">Product</th>
                       <th className="px-4 py-3 font-medium">Platform</th>
+                      <th className="px-4 py-3 font-medium">Source</th>
                       <th className="px-4 py-3 font-medium">Price</th>
                       <th className="px-4 py-3 font-medium">Score</th>
                       <th className="px-4 py-3 font-medium">Status</th>
@@ -613,7 +615,7 @@ export default function Dashboard() {
                     {recentProducts.length === 0 ? (
                       <tr>
                         <td
-                          colSpan={5}
+                          colSpan={6}
                           className="px-4 py-8 text-center text-slate-400"
                         >
                           No products loaded yet. Authenticate first, then run a
@@ -645,6 +647,9 @@ export default function Dashboard() {
                               <span className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium text-slate-200">
                                 {product.platform}
                               </span>
+                            </td>
+                            <td className="px-4 py-4 text-slate-200">
+                              {product.source ?? "N/A"}
                             </td>
                             <td className="px-4 py-4 font-medium text-white">
                               {product.currency} {product.price.toFixed(2)}
