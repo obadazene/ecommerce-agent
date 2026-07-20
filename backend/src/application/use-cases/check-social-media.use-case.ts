@@ -12,10 +12,18 @@ export class CheckSocialMediaUseCase {
 
   async execute(product: Product): Promise<Result<Product>> {
     try {
-      await this.socialMediaPort.searchTikTok(product.name);
-      await this.socialMediaPort.searchInstagram(product.name);
-      await this.socialMediaPort.searchTwitter(product.name);
-      await this.socialMediaPort.searchFacebook(product.name);
+      const results = await Promise.all([
+        this.socialMediaPort.searchTikTok(product.name),
+        this.socialMediaPort.searchInstagram(product.name),
+        this.socialMediaPort.searchTwitter(product.name),
+        this.socialMediaPort.searchFacebook(product.name),
+      ]);
+
+      if (!results.some((result) => result.exists)) {
+        return Result.failure(
+          `Social media check failed: No social media presence found for ${product.name}`,
+        );
+      }
 
       return Result.success(product);
     } catch (error) {

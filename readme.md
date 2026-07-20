@@ -26,15 +26,15 @@
 
 ### What It Does
 
-The E-Commerce Agent is a personal product research assistant that automates the daily monitoring of AliExpress for products matching specific "Winning Product" criteria.
+The E-Commerce Agent is a personal product research assistant that automates AliExpress discovery, product scoring, social-media checks, and marketplace checks for products matching the project’s "Winning Product" criteria.
 
 ### Core Capabilities
 
 | #   | Capability              | Description                                                                    |
 | --- | ----------------------- | ------------------------------------------------------------------------------ |
-| 1   | AliExpress Search       | Searches AliExpress daily based on given criteria                              |
-| 2   | Cross-Platform Check    | Checks if product exists on Amazon, Shopify, WooCommerce, eBay                 |
-| 3   | Social Media Monitoring | Searches TikTok, Instagram, Twitter, Facebook for mentions                     |
+| 1   | AliExpress Search       | Searches AliExpress with multiple keywords and fallback scraping               |
+| 2   | Cross-Platform Check    | Checks product presence on Amazon, Shopify, WooCommerce, eBay, Temu            |
+| 3   | Social Media Monitoring | Searches TikTok, Instagram, Twitter, Facebook, YouTube, Pinterest for mentions |
 | 4   | Winning Product Scoring | Scores products against 7 criteria using weighted scoring                      |
 | 5   | Daily Email Report      | Sends a detailed report every day at 5 AM                                      |
 | 6   | New Product Alerts      | Flags products appearing for the first time on AliExpress under given criteria |
@@ -76,11 +76,11 @@ The E-Commerce Agent is a personal product research assistant that automates the
 
 ### Python Microservices (AI Workers)
 
-| Service          | Technology                                    |
-| ---------------- | --------------------------------------------- |
-| Scraper Service  | Python + FastAPI + BeautifulSoup + Playwright |
-| Social Service   | Python + FastAPI + Gemini                     |
-| Detector Service | Python + FastAPI + Mistral                    |
+| Service          | Technology                                                               |
+| ---------------- | ------------------------------------------------------------------------ |
+| Scraper Service  | Python + FastAPI + Bright Data Web Unlocker + BeautifulSoup + Playwright |
+| Social Service   | Python + FastAPI + Gemini                                                |
+| Detector Service | Python + FastAPI + Mistral                                               |
 
 ### Service Communication
 
@@ -169,13 +169,18 @@ After copying `.env.example` to `.env`, configure the following values:
 
 #### Required Configuration
 
-| Variable          | Description                  | Example                                                  |
-| ----------------- | ---------------------------- | -------------------------------------------------------- |
-| `DATABASE_URL`    | PostgreSQL connection string | `postgresql://user:pass@localhost:5432/db`               |
-| `JWT_SECRET`      | Secret key for JWT tokens    | `random-32-char-string`                                  |
-| `GEMINI_API_KEY`  | Google Gemini API key        | Get from [Google AI Studio](https://aistudio.google.com) |
-| `GROQ_API_KEY`    | Groq API key for LLM         | Get from [Groq Console](https://console.groq.com)        |
-| `MISTRAL_API_KEY` | Mistral API key              | Get from [Mistral Console](https://console.mistral.ai)   |
+| Variable                  | Description                                  | Example                                                  |
+| ------------------------- | -------------------------------------------- | -------------------------------------------------------- |
+| `DATABASE_URL`            | PostgreSQL connection string                 | `postgresql://user:pass@localhost:5432/db`               |
+| `JWT_SECRET`              | Secret key for JWT tokens                    | `random-32-char-string`                                  |
+| `GEMINI_API_KEY`          | Google Gemini API key                        | Get from [Google AI Studio](https://aistudio.google.com) |
+| `GROQ_API_KEY`            | Groq API key for LLM                         | Get from [Groq Console](https://console.groq.com)        |
+| `MISTRAL_API_KEY`         | Mistral API key                              | Get from [Mistral Console](https://console.mistral.ai)   |
+| `BRIGHT_DATA_API_KEY`     | Bright Data Web Unlocker API key             | Required for primary AliExpress scraping                 |
+| `BRIGHT_DATA_ZONE`        | Bright Data Web Unlocker zone                | Example: `web_unlocker1`                                 |
+| `BRIGHT_DATA_MIN_CREDITS` | Credit threshold for switching to Playwright | `100`                                                    |
+
+**Bright Data setup:** Create or copy a Web Unlocker API key from your [Bright Data dashboard](https://brightdata.com/), then set `BRIGHT_DATA_API_KEY`, `BRIGHT_DATA_ZONE`, and `BRIGHT_DATA_MIN_CREDITS` in `.env`.
 
 #### 📧 Email Configuration (SMTP)
 
@@ -218,12 +223,12 @@ SMTP_TO=recipient@gmail.com
 ### Autonomous Dropshipping Discovery (5 AM Daily)
 
 - `POST /products/auto-search` - **Trigger autonomous product discovery**
-  - Searches AliExpress for trending products
-  - Scores ALL products against winning criteria (7 criteria)
-  - Filters products scoring ≥ 70
-  - Checks if products exist on TikTok, Instagram, Twitter, Facebook
+  - Searches AliExpress with multiple discovery keywords such as `trending`, `new 2026`, `best seller`, and `hot sale`
+  - Uses Bright Data first, then Playwright, then HTML/Bing/demo fallbacks
+  - Scores products against the 7 winning criteria
+  - Keeps both winning and non-winning products for review in the report
+  - Checks social-media and marketplace presence as decision signals, not hard rejection gates
   - Sends email report with high-potential dropshipping products
-  - **No keyword needed** - fully autonomous!
 
 - `GET /products/auto-search/criteria` - View scoring thresholds & search parameters
 
@@ -246,15 +251,17 @@ SMTP_TO=recipient@gmail.com
 
 ```
 1. AliExpress Search
-   ↓ (No keyword needed - searches trending)
-2. Product Scoring
+   ↓ (Multiple keywords: trending, new 2026, best seller, hot sale, etc.)
+2. Bright Data Web Unlocker
+   ↓ (Primary source)
+3. Playwright / HTML / Bing / demo fallback
+   ↓ (Used when Bright Data fails or credits are low)
+4. Product Scoring
    ↓ (Scores against 7 winning criteria)
-3. Filter Winners
-   ↓ (Keep only products scoring ≥ 70)
-4. Social Media Check
-   ↓ (Verify presence on TikTok, Instagram, Twitter, Facebook)
-5. Send Email Report
-   ↓ (Email with high-potential dropshipping products)
+5. Signal Checks
+   ↓ (Social-media + e-commerce presence for review, not rejection)
+6. Send Email Report
+   ↓ (Includes winners and non-winners for AI-review)
 ```
 
 **Winning Product Criteria (7 factors):**
@@ -271,9 +278,9 @@ Each product is scored 0-100 on these 7 dimensions:
 | 6   | **Specific Niche**       | 8%     | Can be targeted to a specific community/audience. Product for specific people.                                                    |
 | 7   | **Lightweight Shipping** | 7%     | Small weight, ships easily & cheaply. Low logistics costs for dropshipping.                                                       |
 
-**Winning Score Threshold: ≥ 70/100**
+**Winning Score Threshold: ≥ 50/100**
 
-Only products scoring 70 or higher are considered viable dropshipping candidates and included in daily email reports.
+Only products scoring 50 or higher are considered viable dropshipping candidates, but non-winning products are also included in the report so you can review possible AI scoring mistakes.
 
 **Manual Trigger:**
 
@@ -283,6 +290,8 @@ curl -X POST http://localhost:3000/products/auto-search \
 ```
 
 **Or test it at:** `http://localhost:3000/products/auto-search` (with auth header)
+
+Use the same endpoint with an auth header to run the autonomous discovery flow on demand.
 
 ---
 
@@ -333,9 +342,9 @@ ecommerce-agent/
 - Manual product search by keyword.
 - Autonomous scheduled product discovery workflow.
 - Product scoring based on seven weighted winning-product criteria.
-- Cross-platform verification flow for marketplace presence.
-- Social media signal checking flow for product mentions.
-- Daily email report generation.
+- Cross-platform and social-media verification flows used as decision signals.
+- Bright Data credit-aware scraping with automatic fallback to Playwright when credits run low.
+- Daily email report generation with winners and non-winners for review.
 - Frontend dashboard and chat interface.
 - Multi-service architecture using NestJS, Next.js, and Python workers.
 

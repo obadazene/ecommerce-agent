@@ -1,11 +1,13 @@
 import os
 import json
 import logging
-from typing import Optional
+from typing import Any, Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-import google.generativeai as genai
+import google.generativeai as genai_module
 import httpx
+
+genai: Any = genai_module
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -26,7 +28,7 @@ DEFAULT_MISTRAL_MODEL = os.getenv(
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 else:
-    logger.warning("GEMINI_API_KEY not configured - using fallback scoring")
+    logger.warning("GEMINI_API_KEY not configured - provider fallback chain only")
 
 # Note: Mistral not currently integrated, using local scoring calculation
 # mistral_client would be initialized here if needed
@@ -305,7 +307,7 @@ async def analyze_with_mistral(product: ProductRequest, prompt: str) -> dict:
 
 
 async def analyze_with_fallback_chain(product: ProductRequest, prompt: str) -> dict:
-    """Provider chain: Groq -> Mistral -> local fallback."""
+    """Provider chain: Groq -> Mistral. Returns explicit blocked error if all fail."""
     logger.warning(
         "Gemini limit reached, switching to Groq fallback model: %s",
         DEFAULT_GROQ_MODEL,
@@ -322,11 +324,13 @@ async def analyze_with_fallback_chain(product: ProductRequest, prompt: str) -> d
     if mistral_result.get("status") != "blocked":
         return mistral_result
 
-    logger.warning("All API providers unavailable, using local fallback scoring")
-    return get_fallback_analysis(
-        model_used="local-fallback",
-        reason="Fallback scoring - Gemini/Groq/Mistral unavailable",
-    )
+    logger.error("All API providers unavailable; returning explicit blocked response")
+    return {
+        "error": "ALL_PROVIDERS_BLOCKED",
+        "message": "Analysis unavailable: Gemini, Groq, and Mistral are all unavailable.",
+        "status": "blocked",
+        "http_status": 503,
+    }
 
 
 async def analyze_with_gemini(product: ProductRequest) -> dict:
@@ -369,7 +373,12 @@ async def analyze_with_gemini(product: ProductRequest) -> dict:
             return await analyze_with_fallback_chain(product, prompt)
         else:
             logger.error(f"Gemini analysis failed: {str(e)}")
-        return get_fallback_analysis()
+        return {
+            "error": "GEMINI_ANALYSIS_FAILED",
+            "message": "Analysis unavailable: Gemini failed and provider fallback chain was not completed.",
+            "status": "blocked",
+            "http_status": 503,
+        }
 
 
 async def format_with_mistral(analysis: dict, product: ProductRequest) -> dict:
@@ -455,24 +464,6 @@ def calculate_final_score(analysis: dict) -> dict:
     }
 
 
-def get_fallback_analysis(
-    model_used: str = "local-fallback",
-    reason: str = "Fallback scoring - API unavailable",
-) -> dict:
-    """Fallback analysis when APIs fail"""
-    return {
-        "wow": 5,
-        "solves_problem": 5,
-        "makes_better_easier": 5,
-        "high_perceived_value": 5,
-        "mass_market_appeal": 5,
-        "specific_niche": 5,
-        "lightweight_shipping": 5,
-        "reasoning": reason,
-        "_model_used": model_used,
-    }
-
-
 @app.post("/analyze")
 async def analyze_product(request: ProductRequest):
     """Full analysis pipeline: Gemini → Mistral → Final Score"""
@@ -485,8 +476,9 @@ async def analyze_product(request: ProductRequest):
         # Check if Gemini hit rate limit
         if gemini_analysis.get("status") == "blocked":
             logger.error(f"🚨 API RATE LIMIT BLOCKED: {gemini_analysis.get('error')}")
+            status_code = int(gemini_analysis.get("http_status", 429))
             raise HTTPException(
-                status_code=429,
+                status_code=status_code,
                 detail=gemini_analysis.get("message", "API rate limit reached")
             )
         
@@ -496,8 +488,9 @@ async def analyze_product(request: ProductRequest):
         # Check if Mistral hit rate limit
         if final_result.get("status") == "blocked":
             logger.error(f"🚨 API RATE LIMIT BLOCKED: {final_result.get('error')}")
+            status_code = int(final_result.get("http_status", 429))
             raise HTTPException(
-                status_code=429,
+                status_code=status_code,
                 detail=final_result.get("message", "API rate limit reached")
             )
         

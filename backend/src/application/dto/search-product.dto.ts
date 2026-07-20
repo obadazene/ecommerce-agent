@@ -24,4 +24,14 @@ export class SearchProductDto {
   @IsOptional()
   @IsBoolean()
   checkSocialMedia!: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  minRating?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  minSales?: number;
 }

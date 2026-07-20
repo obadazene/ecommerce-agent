@@ -16,6 +16,7 @@ services:
       - SMTP_USER=${SMTP_USER}
       - SMTP_PASS=${SMTP_PASS}
       - SCRAPER_URL=http://scraper:5001
+      - SOCIAL_URL=http://social:5002
       - DETECTOR_URL=http://detector:5003
     depends_on:
       - postgres
@@ -41,6 +42,11 @@ services:
       - "5001:5001"
     environment:
       - GROQ_API_KEY=${GROQ_API_KEY}
+      - BRIGHT_DATA_API_KEY=${BRIGHT_DATA_API_KEY}
+      - BRIGHT_DATA_API_URL=${BRIGHT_DATA_API_URL}
+      - BRIGHT_DATA_ZONE=${BRIGHT_DATA_ZONE}
+      - BRIGHT_DATA_FORMAT=${BRIGHT_DATA_FORMAT}
+      - BRIGHT_DATA_MIN_CREDITS=${BRIGHT_DATA_MIN_CREDITS}
     networks:
       - agent-network
 

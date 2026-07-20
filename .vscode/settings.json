@@ -1,4 +1,7 @@
 {
-  "python.defaultInterpreterPath": "C:\\Python314\\python.exe",
+  "python.defaultInterpreterPath": "C:\\Users\\obada\\AppData\\Local\\Programs\\Python\\Python313\\python.exe",
+  "python.analysis.extraPaths": [
+    "C:\\Users\\obada\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages"
+  ],
   "prisma.pinToPrisma6": true
 }

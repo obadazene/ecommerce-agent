@@ -48,12 +48,12 @@ export class GenkitService implements OnModuleInit {
       }
     };
 
-    const fallbackMiddleware = async (context: any, next: any) => {
+    const errorMiddleware = async (context: any, next: any) => {
       try {
         return await next();
       } catch (error) {
-        this.logger.error("Genkit fallback triggered", error);
-        return { fallback: true, message: "Service temporarily unavailable" };
+        this.logger.error("Genkit request failed", error as Error);
+        throw error;
       }
     };
 
@@ -65,7 +65,7 @@ export class GenkitService implements OnModuleInit {
     };
 
     this.client.use(retryMiddleware);
-    this.client.use(fallbackMiddleware);
+    this.client.use(errorMiddleware);
     this.client.use(loggingMiddleware);
   }
 

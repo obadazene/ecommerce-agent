@@ -4,6 +4,7 @@ import {
   Controller,
   Get,
   Inject,
+  Logger,
   Post,
   ServiceUnavailableException,
   UseGuards,
@@ -24,6 +25,8 @@ import { JwtAuthGuard } from "../guards/jwt-auth.guard";
 @UseGuards(JwtAuthGuard)
 @Controller("products")
 export class ProductController {
+  private readonly logger = new Logger(ProductController.name);
+
   constructor(
     private readonly searchProductUseCase: SearchProductUseCase,
     private readonly checkCrossPlatformUseCase: CheckCrossPlatformUseCase,
@@ -52,6 +55,169 @@ export class ProductController {
     );
   }
 
+  private getAutoSearchKeywords(): string[] {
+    const currentYear = new Date().getFullYear();
+
+    return [
+      "trending",
+      "viral",
+      "new arrivals",
+      "best seller",
+      "hot sale",
+      `new ${currentYear}`,
+      "top rated",
+      "must have",
+      "popular",
+      "fast shipping",
+    ];
+  }
+
+  private buildKeywordListFromCriteria(criteria: SearchProductDto): string[] {
+    const rawKeyword = (criteria.keyword ?? "").trim();
+
+    if (!rawKeyword || rawKeyword.toLowerCase() === "trending") {
+      return this.getAutoSearchKeywords();
+    }
+
+    const splitKeywords = rawKeyword
+      .split(",")
+      .map((keyword) => keyword.trim())
+      .filter((keyword) => keyword.length > 0);
+
+    return splitKeywords.length > 0 ? splitKeywords : [rawKeyword];
+  }
+
+  private normalizePlatforms(platforms?: string[]): string[] {
+    if (!platforms || platforms.length === 0) {
+      return ["AliExpress"];
+    }
+
+    return platforms.map((platform) => platform.trim()).filter(Boolean);
+  }
+
+  private buildSearchCriteria(
+    base: SearchProductDto,
+    keyword: string,
+  ): SearchProductDto {
+    const criteria = new SearchProductDto();
+    criteria.keyword = keyword;
+    criteria.maxPrice = base.maxPrice;
+    criteria.checkSocialMedia = base.checkSocialMedia;
+    criteria.platforms = this.normalizePlatforms(base.platforms);
+    criteria.minRating = base.minRating;
+    criteria.minSales = base.minSales;
+    return criteria;
+  }
+
+  private async discoverProducts(
+    criteria: SearchProductDto,
+  ): Promise<Product[]> {
+    const keywords = this.buildKeywordListFromCriteria(criteria);
+    this.logger.log(
+      `Workflow search using keyword set: ${keywords.join(", ")}`,
+    );
+
+    const productsByKey = new Map<string, Product>();
+
+    for (const keyword of keywords) {
+      const keywordCriteria = this.buildSearchCriteria(criteria, keyword);
+
+      this.logger.debug(`Running scraper search for keyword: ${keyword}`);
+      const searchResult =
+        await this.searchProductUseCase.execute(keywordCriteria);
+      if (searchResult.isFailure()) {
+        this.logger.warn(
+          `Search failed for keyword '${keyword}': ${searchResult.getError()}`,
+        );
+        continue;
+      }
+
+      const foundProducts = searchResult.getValue();
+      this.logger.log(
+        `Keyword '${keyword}' returned ${foundProducts.length} products`,
+      );
+
+      for (const product of foundProducts) {
+        const dedupeKey =
+          product.url?.trim().toLowerCase() || product.id.trim().toLowerCase();
+        if (!productsByKey.has(dedupeKey)) {
+          productsByKey.set(dedupeKey, product);
+        }
+      }
+    }
+
+    return Array.from(productsByKey.values());
+  }
+
+  private async processQualifiedProducts(
+    products: Product[],
+    minOverallScore: number,
+    checkSocialMedia: boolean,
+  ): Promise<Result<{ winners: Product[]; analyzed: Product[] }>> {
+    const winners: Product[] = [];
+    const analyzed: Product[] = [];
+
+    for (const product of products) {
+      try {
+        const scoreResult = await this.scoreProductUseCase.execute(product);
+        if (scoreResult.isFailure()) {
+          if (this.isRateLimitError(scoreResult.getError())) {
+            this.throwRateLimitError(scoreResult.getError());
+          }
+          continue;
+        }
+
+        const score = scoreResult.getValue().overallScore;
+        const scoredProduct = this.withCriteriaScore(product, score);
+        analyzed.push(scoredProduct);
+
+        if (score < minOverallScore) {
+          continue;
+        }
+
+        let socialSignal = "skipped";
+        let marketplaceSignal = "unknown";
+
+        if (checkSocialMedia) {
+          const socialResult =
+            await this.checkSocialMediaUseCase.execute(scoredProduct);
+          if (socialResult.isFailure()) {
+            socialSignal = "none";
+            this.logger.debug(
+              `Social signal for '${scoredProduct.name}': none (${socialResult.getError()})`,
+            );
+          } else {
+            socialSignal = "found";
+          }
+        }
+
+        const crossResult =
+          await this.checkCrossPlatformUseCase.execute(scoredProduct);
+        if (crossResult.isFailure()) {
+          marketplaceSignal = "none";
+          this.logger.debug(
+            `Marketplace signal for '${scoredProduct.name}': none (${crossResult.getError()})`,
+          );
+        } else {
+          marketplaceSignal = "found";
+        }
+
+        this.logger.log(
+          `Decision signals for '${scoredProduct.name}': social=${socialSignal}, marketplace=${marketplaceSignal}`,
+        );
+
+        await this.productRepository.save(scoredProduct);
+        winners.push(scoredProduct);
+      } catch (error) {
+        if (this.isRateLimitError(error)) {
+          this.throwRateLimitError(error);
+        }
+      }
+    }
+
+    return Result.success({ winners, analyzed });
+  }
+
   @Post("search")
   async search(@Body() criteria: SearchProductDto): Promise<Result<Product[]>> {
     const result = await this.executeFullWorkflow(criteria);
@@ -74,7 +240,7 @@ export class ProductController {
 
   @Get()
   async findAll(): Promise<Result<Product[]>> {
-    throw new BadRequestException("Not implemented");
+    return Result.success(await this.productRepository.findAll());
   }
 
   @Get("new")
@@ -109,61 +275,50 @@ export class ProductController {
         this.scheduledSearchService.getGenericSearchCriteria();
       const thresholds = this.scheduledSearchService.getScoringThresholds();
 
-      // Step 1: Search with generic criteria (broad discovery)
+      const keywords = this.getAutoSearchKeywords();
+      this.logger.log(`Auto-search using keyword set: ${keywords.join(", ")}`);
+      const yearKeyword = keywords.find((keyword) =>
+        keyword.startsWith("new "),
+      );
+      if (yearKeyword) {
+        this.logger.log(`Auto-search dynamic year keyword: ${yearKeyword}`);
+      }
+
       const searchDto = new SearchProductDto();
-      searchDto.keyword = "trending"; // Generic search for trending products
+      searchDto.keyword = keywords.join(", ");
       searchDto.maxPrice = genericCriteria.maxPrice;
+      searchDto.platforms = ["AliExpress"];
+      searchDto.minRating = genericCriteria.minRating;
+      searchDto.minSales = genericCriteria.minSales;
+      searchDto.checkSocialMedia = true;
 
-      const searchResult = await this.searchProductUseCase.execute(searchDto);
-      if (searchResult.isFailure()) {
-        throw new BadRequestException(searchResult.getError());
+      const allProducts = await this.discoverProducts(searchDto);
+      if (allProducts.length === 0) {
+        return this.sendFallbackReportFromCache(
+          thresholds.minOverallScore,
+          true,
+        );
       }
 
-      const allProducts = searchResult.getValue();
-      const winningProducts: Product[] = [];
-
-      // Step 2 & 3: Score and check social media for each product
-      for (const product of allProducts) {
-        try {
-          // Score product
-          const scoreResult = await this.scoreProductUseCase.execute(product);
-          if (scoreResult.isFailure()) {
-            // Check if it's a rate limit error
-            if (this.isRateLimitError(scoreResult.getError())) {
-              this.throwRateLimitError(scoreResult.getError());
-            }
-            continue;
-          }
-
-          const score = scoreResult.getValue().overallScore;
-
-          // Only process products that meet winning criteria
-          if (score >= thresholds.minOverallScore) {
-            // Check social media presence
-            const socialResult =
-              await this.checkSocialMediaUseCase.execute(product);
-            if (socialResult.isFailure()) continue;
-
-            // Check cross-platform availability
-            const crossResult =
-              await this.checkCrossPlatformUseCase.execute(product);
-            if (crossResult.isFailure()) continue;
-
-            const winningProduct = this.withCriteriaScore(product, score);
-            await this.productRepository.save(winningProduct);
-            winningProducts.push(winningProduct);
-          }
-        } catch (error) {
-          if (this.isRateLimitError(error)) {
-            this.throwRateLimitError(error);
-          }
-          continue;
-        }
+      const processedResult = await this.processQualifiedProducts(
+        allProducts,
+        thresholds.minOverallScore,
+        true,
+      );
+      if (processedResult.isFailure()) {
+        return Result.failure(processedResult.getError());
       }
+
+      const { winners: winningProducts, analyzed: analyzedProducts } =
+        processedResult.getValue();
 
       // Step 4: Send email report with winning products only (not ALL products in DB)
-      const emailResult =
-        await this.sendDailyReportUseCase.executeWithProducts(winningProducts);
+      const emailResult = await this.sendDailyReportUseCase.executeWithProducts(
+        winningProducts,
+        analyzedProducts,
+        thresholds.minOverallScore,
+        "live-data",
+      );
       if (emailResult.isFailure()) {
         throw new BadRequestException(emailResult.getError());
       }
@@ -191,40 +346,37 @@ export class ProductController {
   private async executeFullWorkflow(
     criteria: SearchProductDto,
   ): Promise<Result<Product[]>> {
-    const searchResult = await this.searchProductUseCase.execute(criteria);
-    if (searchResult.isFailure()) {
-      return Result.failure(searchResult.getError());
+    const normalizedCriteria = new SearchProductDto();
+    normalizedCriteria.keyword = criteria.keyword;
+    normalizedCriteria.maxPrice = criteria.maxPrice;
+    normalizedCriteria.platforms = this.normalizePlatforms(criteria.platforms);
+    normalizedCriteria.checkSocialMedia = criteria.checkSocialMedia;
+    normalizedCriteria.minRating = criteria.minRating;
+    normalizedCriteria.minSales = criteria.minSales;
+
+    const products = await this.discoverProducts(normalizedCriteria);
+    if (products.length === 0) {
+      return this.sendFallbackReportFromCache(5, false);
     }
 
-    const products = searchResult.getValue();
-    const scoredProducts: Product[] = [];
-
-    for (const product of products) {
-      const crossResult = await this.checkCrossPlatformUseCase.execute(product);
-      if (crossResult.isFailure()) {
-        return Result.failure(crossResult.getError());
-      }
-
-      const socialResult = await this.checkSocialMediaUseCase.execute(product);
-      if (socialResult.isFailure()) {
-        return Result.failure(socialResult.getError());
-      }
-
-      const scoreResult = await this.scoreProductUseCase.execute(product);
-      if (scoreResult.isFailure()) {
-        return Result.failure(scoreResult.getError());
-      }
-
-      const scoredProduct = this.withCriteriaScore(
-        product,
-        scoreResult.getValue().overallScore,
-      );
-      await this.productRepository.save(scoredProduct);
-      scoredProducts.push(scoredProduct);
+    const processedResult = await this.processQualifiedProducts(
+      products,
+      5,
+      normalizedCriteria.checkSocialMedia !== false,
+    );
+    if (processedResult.isFailure()) {
+      return Result.failure(processedResult.getError());
     }
 
-    const emailResult =
-      await this.sendDailyReportUseCase.executeWithProducts(scoredProducts);
+    const { winners: scoredProducts, analyzed: analyzedProducts } =
+      processedResult.getValue();
+
+    const emailResult = await this.sendDailyReportUseCase.executeWithProducts(
+      scoredProducts,
+      analyzedProducts,
+      5,
+      "live-data",
+    );
     if (emailResult.isFailure()) {
       return Result.failure(emailResult.getError());
     }
@@ -248,5 +400,51 @@ export class ProductController {
       product.isNew,
       product.createdAt,
     );
+  }
+
+  private async sendFallbackReportFromCache(
+    minMatchingScore: number,
+    winnersOnly: boolean,
+  ): Promise<Result<Product[]>> {
+    const cachedProducts = await this.productRepository.findAll();
+    if (cachedProducts.length === 0) {
+      this.logger.warn(
+        "No live products found and cache is empty. Sending blocked-source empty report.",
+      );
+      const emptyEmailResult =
+        await this.sendDailyReportUseCase.executeWithProducts(
+          [],
+          [],
+          minMatchingScore,
+          "blocked-source",
+        );
+      if (emptyEmailResult.isFailure()) {
+        return Result.failure(emptyEmailResult.getError());
+      }
+      return Result.success([]);
+    }
+
+    const cachedWinners = cachedProducts.filter(
+      (product) =>
+        product.criteriaScore !== null &&
+        product.criteriaScore >= minMatchingScore,
+    );
+
+    this.logger.warn(
+      `Live discovery returned 0 products. Reusing ${cachedProducts.length} cached products for report fallback.`,
+    );
+
+    const fallbackEmailResult =
+      await this.sendDailyReportUseCase.executeWithProducts(
+        cachedWinners,
+        cachedProducts,
+        minMatchingScore,
+        "fallback-cache",
+      );
+    if (fallbackEmailResult.isFailure()) {
+      return Result.failure(fallbackEmailResult.getError());
+    }
+
+    return Result.success(winnersOnly ? cachedWinners : cachedProducts);
   }
 }

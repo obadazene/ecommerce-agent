@@ -14,29 +14,46 @@ export class SendDailyReportUseCase {
     private readonly productRepository: ProductRepositoryPort,
   ) {}
 
-  async executeWithProducts(products: Product[]): Promise<Result<void>> {
+  async executeWithProducts(
+    products: Product[],
+    analyzedProducts: Product[] = products,
+    minMatchingScore: number = 5,
+    dataQuality:
+      "live-data" | "fallback-cache" | "blocked-source" = "live-data",
+  ): Promise<Result<void>> {
     try {
-      const totalProducts = products.length;
-      const matchingProducts = products.filter(
+      const totalProducts = analyzedProducts.length;
+      const matchingProducts = analyzedProducts.filter(
         (product) =>
-          product.criteriaScore !== null && product.criteriaScore >= 5,
+          product.criteriaScore !== null &&
+          product.criteriaScore >= minMatchingScore,
       ).length;
-      const newProducts = products.filter((product) => product.isNew).length;
+      const newProducts = analyzedProducts.filter(
+        (product) => product.isNew,
+      ).length;
       const averageScore =
-        products.length === 0
+        analyzedProducts.length === 0
           ? 0
-          : products.reduce(
+          : analyzedProducts.reduce(
               (sum, product) => sum + (product.criteriaScore ?? 0),
               0,
-            ) / products.length;
+            ) / analyzedProducts.length;
+
+      const nonWinningProducts = analyzedProducts.filter(
+        (product) =>
+          product.criteriaScore === null ||
+          product.criteriaScore < minMatchingScore,
+      );
 
       const report = new DailyReportDto(
         new Date(),
+        dataQuality,
         totalProducts,
         matchingProducts,
         newProducts,
         Math.round(averageScore * 100) / 100,
         products,
+        nonWinningProducts,
       );
 
       await this.emailPort.sendReport(report);

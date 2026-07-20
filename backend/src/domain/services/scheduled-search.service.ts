@@ -23,7 +23,7 @@ export class ScheduledSearchService {
    */
   getScoringThresholds() {
     return {
-      minOverallScore: 5, // Detector scores are on a 0-10 scale
+      minOverallScore: 50, // Detector scores are on a 0-100 scale
       minWowFactor: 5,
       minMarketAppeal: 5,
       minPerceivedValue: 5,

@@ -1,13 +1,22 @@
 const API_BASE_URL =
   process.env.API_BASE_URL ||
   process.env.NEXT_PUBLIC_API_BASE_URL ||
-  "http://localhost:3000/api";
+  "http://localhost:3000";
 const ACCESS_TOKEN_KEY = "accessToken";
 const REFRESH_TOKEN_KEY = "refreshToken";
 
 type QueryParams = Record<string, string | number | boolean | null | undefined>;
 
-type FetchBackendOptions = RequestInit & {
+type JsonBody =
+  | string
+  | number
+  | boolean
+  | null
+  | Record<string, unknown>
+  | Array<unknown>;
+
+type FetchBackendOptions = Omit<RequestInit, "body"> & {
+  body?: BodyInit | JsonBody;
   query?: QueryParams;
 };
 
@@ -26,6 +35,29 @@ const setStoredAccessToken = (token: string) => {
     window.localStorage.setItem(ACCESS_TOKEN_KEY, token);
   }
 };
+
+const setStoredRefreshToken = (token: string) => {
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem(REFRESH_TOKEN_KEY, token);
+  }
+};
+
+export const persistAuthSession = (
+  accessToken: string,
+  refreshToken: string,
+) => {
+  setStoredAccessToken(accessToken);
+  setStoredRefreshToken(refreshToken);
+};
+
+export const clearAuthSession = () => {
+  if (typeof window !== "undefined") {
+    window.localStorage.removeItem(ACCESS_TOKEN_KEY);
+    window.localStorage.removeItem(REFRESH_TOKEN_KEY);
+  }
+};
+
+export const hasStoredSession = () => Boolean(getStoredAccessToken());
 
 const buildUrl = (path: string, query?: QueryParams) => {
   const normalizedBase = API_BASE_URL.replace(/\/$/, "");

@@ -134,10 +134,10 @@ export class Product {
 
   /**
    * Determines if the product meets the score threshold
-   * @param threshold - Minimum score to consider as "high" (default: 70)
+   * @param threshold - Minimum score to consider as "high" (default: 50)
    * @returns true if criteriaScore exists and is >= threshold
    */
-  hasHighScore(threshold: number = 70): boolean {
+  hasHighScore(threshold: number = 50): boolean {
     if (this.criteriaScore === null) {
       return false;
     }

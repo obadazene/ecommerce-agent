@@ -12,10 +12,19 @@ export class CheckCrossPlatformUseCase {
 
   async execute(product: Product): Promise<Result<Product>> {
     try {
-      await this.scraperPort.lookupOnAmazon(product.name);
-      await this.scraperPort.lookupOnShopify(product.name);
-      await this.scraperPort.lookupOnWooCommerce(product.name);
-      await this.scraperPort.lookupOnEbay(product.name);
+      const results = await Promise.all([
+        this.scraperPort.lookupOnAmazon(product.name),
+        this.scraperPort.lookupOnShopify(product.name),
+        this.scraperPort.lookupOnWooCommerce(product.name),
+        this.scraperPort.lookupOnEbay(product.name),
+        this.scraperPort.lookupOnTemu(product.name),
+      ]);
+
+      if (!results.some((result) => result.exists)) {
+        return Result.failure(
+          `Cross-platform check failed: No marketplace presence found for ${product.name}`,
+        );
+      }
 
       return Result.success(product);
     } catch (error) {

@@ -1,8 +1,10 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Inject, Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import nodemailer from "nodemailer";
 import { DailyReportDto } from "../../application/dto/daily-report.dto";
 import { EmailPort } from "../../application/ports/email.port";
+import { ScraperPort } from "../../application/ports/scraper.port";
+import { SocialMediaPort } from "../../application/ports/social-media.port";
 import {
   ProductAnalysis,
   ScoringService,
@@ -25,6 +27,10 @@ export class EmailService implements EmailPort {
   constructor(
     private readonly configService: ConfigService,
     private readonly scoringService: ScoringService,
+    @Inject("SocialMediaPort")
+    private readonly socialMediaPort: SocialMediaPort,
+    @Inject("ScraperPort")
+    private readonly scraperPort: ScraperPort,
   ) {
     const smtpUser = this.getConfigWithFallback("SMTP_USER", "EMAIL_USER");
     const smtpPass = this.getConfigWithFallback("SMTP_PASS", "EMAIL_PASSWORD");
@@ -63,15 +69,26 @@ export class EmailService implements EmailPort {
     );
 
     try {
-      const html = this.buildReportHtml(report);
+      const from =
+        this.getConfigWithFallback("SMTP_FROM", "EMAIL_FROM", "SMTP_USER") ||
+        "no-reply@example.com";
+      const to =
+        this.getConfigWithFallback("SMTP_TO", "EMAIL_TO", "SMTP_USER") ||
+        "user@example.com";
+      const html = await this.buildReportHtml(report);
+      const subjectPrefix =
+        report.dataQuality === "fallback-cache"
+          ? "[DEGRADED: FALLBACK CACHE] "
+          : report.dataQuality === "blocked-source"
+            ? "[BLOCKED SOURCE] "
+            : "";
+      this.logger.log(
+        `Report email target: ${to}. Quality: ${report.dataQuality}. Totals -> discovered: ${report.totalProducts}, winners: ${report.products.length}, non-winning: ${report.nonWinningProducts.length}`,
+      );
       await this.transport.sendMail({
-        from:
-          this.getConfigWithFallback("SMTP_FROM", "EMAIL_FROM", "SMTP_USER") ||
-          "no-reply@example.com",
-        to:
-          this.getConfigWithFallback("SMTP_TO", "EMAIL_TO", "SMTP_USER") ||
-          "user@example.com",
-        subject: `Daily Product Report - ${report.date.toDateString()}`,
+        from,
+        to,
+        subject: `${subjectPrefix}Daily Product Report - ${report.date.toDateString()}`,
         html,
       });
 
@@ -109,22 +126,62 @@ export class EmailService implements EmailPort {
     }
   }
 
-  private buildReportHtml(report: DailyReportDto): string {
-    const rows = report.products
+  private async buildReportHtml(report: DailyReportDto): Promise<string> {
+    const qualityLabels: Record<DailyReportDto["dataQuality"], string> = {
+      "live-data": "live-data",
+      "fallback-cache": "fallback-cache",
+      "blocked-source": "blocked-source",
+    };
+
+    const productRowsData = await Promise.all(
+      report.products.map(async (product) => {
+        const social = await this.getSocialMediaPresence(product.name);
+        const ecommerce = await this.getEcommercePresence(
+          product.name,
+          product.platform,
+        );
+        return { product, social, ecommerce };
+      }),
+    );
+
+    const rows = productRowsData
       .map(
-        (product) => `
+        ({ product, social, ecommerce }) => `
           <tr>
             <td>${product.name}</td>
             <td>${product.platform}</td>
             <td>${product.price} ${product.currency}</td>
             <td><a href="${product.url}" target="_blank" rel="noopener noreferrer">Open product</a></td>
-            <td>${product.sellerRating}</td>
-            <td>${product.criteriaScore}</td>
-            <td>${product.isNew ? "Yes" : "No"}</td>
+            <td>${product.sellerRating ?? "N/A"}</td>
+            <td>${product.criteriaScore ?? "N/A"}</td>
+            <td>${this.formatDate(product.launchDate)}</td>
+            <td>${this.formatBoolean(social.tiktok)}</td>
+            <td>${this.formatBoolean(social.instagram)}</td>
+            <td>${this.formatBoolean(social.twitter)}</td>
+            <td>${this.formatBoolean(social.facebook)}</td>
+            <td>${this.formatBoolean(social.youtube)}</td>
+            <td>${this.formatBoolean(social.pinterest)}</td>
+            <td>${this.formatBoolean(ecommerce.aliexpress)}</td>
+            <td>${this.formatBoolean(ecommerce.amazon)}</td>
+            <td>${this.formatBoolean(ecommerce.shopify)}</td>
+            <td>${this.formatBoolean(ecommerce.woocommerce)}</td>
+            <td>${this.formatBoolean(ecommerce.ebay)}</td>
+            <td>${this.formatBoolean(ecommerce.temu)}</td>
           </tr>
         `,
       )
       .join("");
+
+    const nonWinningRowsData = await Promise.all(
+      report.nonWinningProducts.map(async (product) => {
+        const social = await this.getSocialMediaPresence(product.name);
+        const ecommerce = await this.getEcommercePresence(
+          product.name,
+          product.platform,
+        );
+        return { product, social, ecommerce };
+      }),
+    );
 
     const scoreBreakdownRows = report.products
       .map((product) => {
@@ -145,13 +202,38 @@ export class EmailService implements EmailPort {
       })
       .join("");
 
-    return `
-      <h1>Daily Product Report</h1>
-      <p>Date: ${report.date.toDateString()}</p>
-      <p>Total products: ${report.totalProducts}</p>
-      <p>Matching products: ${report.matchingProducts}</p>
-      <p>New products: ${report.newProducts}</p>
-      <p>Average score: ${report.averageScore}</p>
+    const nonWinningRows = nonWinningRowsData
+      .map(
+        ({ product, social, ecommerce }) => `
+          <tr>
+            <td>${product.name}</td>
+            <td>${product.platform}</td>
+            <td>${product.price} ${product.currency}</td>
+            <td><a href="${product.url}" target="_blank" rel="noopener noreferrer">Open product</a></td>
+            <td>${product.sellerRating ?? "N/A"}</td>
+            <td>${product.criteriaScore ?? "N/A"}</td>
+            <td>${this.formatDate(product.launchDate)}</td>
+            <td>${this.formatBoolean(social.tiktok)}</td>
+            <td>${this.formatBoolean(social.instagram)}</td>
+            <td>${this.formatBoolean(social.twitter)}</td>
+            <td>${this.formatBoolean(social.facebook)}</td>
+            <td>${this.formatBoolean(social.youtube)}</td>
+            <td>${this.formatBoolean(social.pinterest)}</td>
+            <td>${this.formatBoolean(ecommerce.aliexpress)}</td>
+            <td>${this.formatBoolean(ecommerce.amazon)}</td>
+            <td>${this.formatBoolean(ecommerce.shopify)}</td>
+            <td>${this.formatBoolean(ecommerce.woocommerce)}</td>
+            <td>${this.formatBoolean(ecommerce.ebay)}</td>
+            <td>${this.formatBoolean(ecommerce.temu)}</td>
+          </tr>
+        `,
+      )
+      .join("");
+
+    const nonWinningSection =
+      report.nonWinningProducts.length === 0
+        ? `<p style="margin-top: 12px;">No non-winning products in this run.</p>`
+        : `
       <table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse; width: 100%;">
         <thead>
           <tr>
@@ -161,13 +243,84 @@ export class EmailService implements EmailPort {
             <th>URL</th>
             <th>Seller Rating</th>
             <th>Score</th>
-            <th>New</th>
+            <th>Launch Date</th>
+            <th>TikTok</th>
+            <th>Instagram</th>
+            <th>Twitter</th>
+            <th>Facebook</th>
+            <th>YouTube</th>
+            <th>Pinterest</th>
+            <th>AliExpress</th>
+            <th>Amazon</th>
+            <th>Shopify</th>
+            <th>WooCommerce</th>
+            <th>eBay</th>
+            <th>Temu</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${nonWinningRows}
+        </tbody>
+      </table>
+    `;
+
+    const winningSection =
+      report.products.length === 0
+        ? `<p style="margin-top: 12px;">No winning products were identified in this run.</p>`
+        : `
+      <table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse; width: 100%;">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Platform</th>
+            <th>Price</th>
+            <th>URL</th>
+            <th>Seller Rating</th>
+            <th>Score</th>
+            <th>Launch Date</th>
+            <th>TikTok</th>
+            <th>Instagram</th>
+            <th>Twitter</th>
+            <th>Facebook</th>
+            <th>YouTube</th>
+            <th>Pinterest</th>
+            <th>AliExpress</th>
+            <th>Amazon</th>
+            <th>Shopify</th>
+            <th>WooCommerce</th>
+            <th>eBay</th>
+            <th>Temu</th>
           </tr>
         </thead>
         <tbody>
           ${rows}
         </tbody>
       </table>
+    `;
+
+    const discoverySummary =
+      report.totalProducts === 0
+        ? `<p><strong>Discovery note:</strong> No products were discovered by the scraper for this run, so both winning and non-winning sections are empty.</p>`
+        : "";
+
+    const qualityBanner =
+      report.dataQuality === "live-data"
+        ? `<div style="margin: 12px 0; padding: 10px 12px; border: 1px solid #b7eb8f; background: #f6ffed; color: #135200; font-weight: 600;">Live data mode: all products in this report come from the current run.</div>`
+        : report.dataQuality === "fallback-cache"
+          ? `<div style="margin: 12px 0; padding: 10px 12px; border: 1px solid #ffe58f; background: #fffbe6; color: #874d00; font-weight: 600;">Degraded mode (fallback cache): live source was blocked or empty, so cached products were reused to keep reporting continuity.</div>`
+          : `<div style="margin: 12px 0; padding: 10px 12px; border: 1px solid #ffa39e; background: #fff1f0; color: #a8071a; font-weight: 600;">Blocked source mode: live source was blocked and cache had no usable products.</div>`;
+
+    return `
+      <h1>Daily Product Report</h1>
+      <p>Date: ${report.date.toDateString()}</p>
+      <p>Data quality: <strong>${qualityLabels[report.dataQuality]}</strong></p>
+      ${qualityBanner}
+      <p>Total products: ${report.totalProducts}</p>
+      <p>Matching products: ${report.matchingProducts}</p>
+      <p>New products: ${report.newProducts}</p>
+      <p>Average score: ${report.averageScore}</p>
+      ${discoverySummary}
+      ${winningSection}
       <h2 style="margin-top: 24px;">How Each Product Score Was Calculated</h2>
       <p>
         Overall score formula:
@@ -188,7 +341,114 @@ export class EmailService implements EmailPort {
           ${scoreBreakdownRows}
         </tbody>
       </table>
+      <h2 style="margin-top: 24px;">Non-Winning Products</h2>
+      ${nonWinningSection}
     `;
+  }
+
+  private async getSocialMediaPresence(productName: string): Promise<{
+    tiktok: boolean;
+    instagram: boolean;
+    twitter: boolean;
+    facebook: boolean;
+    youtube: boolean;
+    pinterest: boolean;
+  }> {
+    try {
+      const [tiktok, instagram, twitter, facebook, youtube, pinterest] =
+        await Promise.all([
+          this.socialMediaPort.searchTikTok(productName),
+          this.socialMediaPort.searchInstagram(productName),
+          this.socialMediaPort.searchTwitter(productName),
+          this.socialMediaPort.searchFacebook(productName),
+          this.socialMediaPort.searchYouTube(productName),
+          this.socialMediaPort.searchPinterest(productName),
+        ]);
+
+      return {
+        tiktok: tiktok.exists,
+        instagram: instagram.exists,
+        twitter: twitter.exists,
+        facebook: facebook.exists,
+        youtube: youtube.exists,
+        pinterest: pinterest.exists,
+      };
+    } catch (error) {
+      this.logger.warn(
+        `Failed to resolve social presence for ${productName}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return {
+        tiktok: false,
+        instagram: false,
+        twitter: false,
+        facebook: false,
+        youtube: false,
+        pinterest: false,
+      };
+    }
+  }
+
+  private async getEcommercePresence(
+    productName: string,
+    sourcePlatform: string,
+  ): Promise<{
+    aliexpress: boolean;
+    amazon: boolean;
+    shopify: boolean;
+    woocommerce: boolean;
+    ebay: boolean;
+    temu: boolean;
+  }> {
+    const source = sourcePlatform.trim().toLowerCase();
+
+    try {
+      const [amazon, shopify, woocommerce, ebay, temu] = await Promise.all([
+        this.scraperPort.lookupOnAmazon(productName),
+        this.scraperPort.lookupOnShopify(productName),
+        this.scraperPort.lookupOnWooCommerce(productName),
+        this.scraperPort.lookupOnEbay(productName),
+        this.scraperPort.lookupOnTemu(productName),
+      ]);
+
+      return {
+        aliexpress: source === "aliexpress",
+        amazon: amazon.exists,
+        shopify: shopify.exists,
+        woocommerce: woocommerce.exists,
+        ebay: ebay.exists,
+        temu: temu.exists,
+      };
+    } catch (error) {
+      this.logger.warn(
+        `Failed to resolve e-commerce presence for ${productName}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+
+      return {
+        aliexpress: source === "aliexpress",
+        amazon: false,
+        shopify: false,
+        woocommerce: false,
+        ebay: false,
+        temu: false,
+      };
+    }
+  }
+
+  private formatDate(value: Date | null): string {
+    if (!value) {
+      return "N/A";
+    }
+
+    const parsedDate = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(parsedDate.getTime())) {
+      return "N/A";
+    }
+
+    return parsedDate.toISOString().split("T")[0];
+  }
+
+  private formatBoolean(value: boolean): string {
+    return value ? "true" : "false";
   }
 
   private toProductAnalysis(

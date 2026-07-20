@@ -11,6 +11,8 @@ RUN apk add --no-cache openssl
 # Copy backend source
 COPY . .
 
+RUN rm -f tsconfig.tsbuildinfo
+
 # Generate Prisma client for runtime initialization
 RUN npx prisma generate
 
