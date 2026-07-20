@@ -265,9 +265,10 @@ SMTP_TO=recipient@gmail.com
 1. Build keywords and run them in small parallel batches.
 2. Try Bright Data for a limited number of keyword searches.
 3. Fall back to Playwright, then HTML/Bing, then demo/cache when needed.
-4. Score the products and run social/ecommerce signals as advisory checks.
-5. Keep the URL blank when no reachable product URL exists.
-6. Include winners and non-winners in the report for review.
+4. Enrich live products with launch-date information when the source page exposes a seller "Opened since" date.
+5. Score the products and run social/ecommerce signals as advisory checks.
+6. Keep the URL blank when no reachable product URL exists.
+7. Include winners and non-winners in the report for review.
 
 ---
 
@@ -307,6 +308,8 @@ Each product is scored 0-100 on these 7 dimensions:
 **Winning Score Threshold: ≥ 50/100**
 
 Only products scoring 50 or higher are considered viable dropshipping candidates, but non-winning products are also included in the report so you can review possible scoring uncertainty, false positives, and false negatives before making a final decision. If a product URL is unavailable, the table cell stays blank.
+
+Launch date note: when available, the launch-date column is populated from the seller store-open date shown on the product page (for example, an "Opened since" label). If that information is not exposed by the source page or the product comes from demo/fallback data, the field remains `N/A`.
 
 **Manual Trigger:**
 
