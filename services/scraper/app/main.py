@@ -319,7 +319,11 @@ async def enrich_items_with_launch_dates(items: list[dict]) -> list[dict]:
 
                 launch_date = extract_store_opened_since(response.text)
                 if launch_date:
-                    return {**item, "launchDate": launch_date}
+                    return {
+                        **item,
+                        "launchDate": launch_date,
+                        "launch_date": launch_date,
+                    }
             except Exception:
                 return item
 
@@ -562,6 +566,7 @@ def _standardize_bright_data_product(raw: dict, index: int, query: str) -> dict:
     seller_rating = raw.get("rating") or raw.get("seller_rating")
     sales_count = raw.get("sales_count") or raw.get("sales") or raw.get("orders")
     description = raw.get("description")
+    launch_date = raw.get("launch_date") or raw.get("launchDate")
 
     return {
         "id": _build_product_id(url, name, index, "aliexpress"),
@@ -574,6 +579,7 @@ def _standardize_bright_data_product(raw: dict, index: int, query: str) -> dict:
         "seller_name": seller_name,
         "seller_rating": seller_rating,
         "sales_count": sales_count,
+        "launch_date": launch_date,
         "description": description,
     }
 
@@ -583,6 +589,7 @@ def _standardize_playwright_product(raw: dict, index: int, query: str) -> dict:
     url = str(raw.get("url") or "").strip()
     price = _parse_price(raw.get("price"))
     image_url = raw.get("imageUrl") or raw.get("image") or raw.get("image_url")
+    launch_date = raw.get("launch_date") or raw.get("launchDate")
 
     return {
         "id": _build_product_id(url, name, index, "aliexpress"),
@@ -595,6 +602,7 @@ def _standardize_playwright_product(raw: dict, index: int, query: str) -> dict:
         "seller_name": raw.get("seller") or raw.get("seller_name"),
         "seller_rating": raw.get("rating") or raw.get("seller_rating"),
         "sales_count": raw.get("sales_count") or raw.get("sales") or raw.get("orders"),
+        "launch_date": launch_date,
         "description": raw.get("description"),
     }
 
@@ -607,7 +615,7 @@ def _to_legacy_item(product: dict) -> dict:
         "imageUrl": product.get("image_url"),
         "sellerRating": product.get("seller_rating"),
         "salesCount": product.get("sales_count"),
-        "launchDate": None,
+        "launchDate": product.get("launch_date") or product.get("launchDate"),
     }
 
 
@@ -805,6 +813,8 @@ async def search_aliexpress(request: SearchRequest):
         )
         products = await get_demo_products(query)
         source = "demo"
+    elif source != "demo":
+        products = await enrich_items_with_launch_dates(products)
 
     LAST_SCRAPE_SOURCE = source
 
